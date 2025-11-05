@@ -30,6 +30,53 @@ class _MapScreenState extends State<MapScreen> {
   bool _filterFree = false;
   bool _filterAccessible = false;
 
+  /// Devuelve una lista de baños de prueba (mocks)
+  List<Bathroom> _getMockBathrooms() {
+    return [
+      Bathroom(
+        id: 1001,
+        lat: -35.428, // Cerca del centro
+        lon: -71.655,
+        tags: {
+          'name': 'Baño Mall Plaza (Prueba)',
+          'fee': 'no', // Para probar filtro "Gratis"
+          'toilets:wheelchair': 'yes', // Para probar "Accesible"
+        },
+      ),
+      Bathroom(
+        id: 1002,
+        lat: -35.425,
+        lon: -71.652,
+        tags: {
+          'name': 'Baño Municipal (Prueba)',
+          'fee': 'yes', // Para probar filtro "De Pago"
+          'toilets:wheelchair': 'no', // Para probar "No Accesible"
+        },
+      ),
+      Bathroom(
+        id: 1003,
+        lat: -35.426,
+        lon: -71.658,
+        tags: {
+          'name': 'Baños Café del Parque (Prueba)',
+          'fee': 'yes', // De Pago
+          'toilets:wheelchair': 'yes', // Accesible
+        },
+      ),
+      Bathroom(
+        id: 1004,
+        lat: -35.430,
+        lon: -71.650,
+        tags: {
+          'name': 'Baño Plaza de Armas (Prueba)',
+          'fee': 'no', // Gratis
+          'toilets:wheelchair':
+              'limited', // No es 'yes', así que no saldrá en filtro "Accesible"
+        },
+      ),
+    ];
+  }
+
   @override
   void initState() {
     super.initState();
@@ -52,7 +99,9 @@ class _MapScreenState extends State<MapScreen> {
     // --- Fin Inyección ---
 
     try {
-      final bathrooms = await getBathroomsUseCase.call();
+      final apibathrooms = await getBathroomsUseCase.call();
+      final fakebathrooms = _getMockBathrooms();
+      final bathrooms = [...apibathrooms, ...fakebathrooms];
       setState(() {
         _allBathrooms = bathrooms;
         _filteredBathrooms = bathrooms; // Al inicio, ambas listas son iguales
@@ -143,10 +192,10 @@ class _MapScreenState extends State<MapScreen> {
         child: IconButton(
           // --- TERMINA CORRECCIÓN ---
           icon: Icon(
-            Icons.location_pin,
+            Icons.wc,
             color: bathroom.isAccessible
-                ? Colors.blue
-                : (bathroom.isFree ? Colors.green : Colors.red),
+                ? (bathroom.isFree ? Colors.green : Colors.blue)
+                : (bathroom.isFree ? Colors.purple : Colors.red),
             size: 35,
           ),
           onPressed: () {
@@ -216,7 +265,7 @@ class _MapScreenState extends State<MapScreen> {
               ),
               SizedBox(height: 10),
               Text('Gratis: ${bathroom.isFree ? "Sí" : "No"}'),
-              Text('Accesible: ${bathroom.isAccessible ? "Sí" : "Verificado"}'),
+              Text('Accesible: ${bathroom.isAccessible ? "Sí" : "No"}'),
               // Aquí irían los botones de HU1 (Detalle, Reseñar, Reportar)
             ],
           ),
