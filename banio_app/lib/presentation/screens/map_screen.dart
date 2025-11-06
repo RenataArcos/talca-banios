@@ -2,14 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'dart:async';
-import 'package:connectivity_plus/connectivity_plus.dart';
+//import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:geolocator/geolocator.dart';
 
 import '../../domain/entities/bathroom.dart';
 import '../../domain/use_cases/get_bathrooms_usecase.dart';
 import '../widgets/loading_indicator.dart';
 //import 'package:url_launcher/url_launcher.dart';
 
-import '../widgets/error_message.dart';
+//import '../widgets/error_message.dart';
 
 //Importaciones para Inyección de Dependencias
 import '../../data/data_sources/osm_data_source.dart';
@@ -29,6 +30,27 @@ class _MapScreenState extends State<MapScreen> {
   final TextEditingController _searchController = TextEditingController();
   bool _filterFree = false;
   bool _filterAccessible = false;
+
+  final LocationSettings _locSettings = const LocationSettings(
+    accuracy: LocationAccuracy.high,
+    distanceFilter: 0,
+    timeLimit: Duration(seconds: 8),
+  );
+
+  final MapController _mapController = MapController();
+  LatLng? _myPos;
+
+  String _fmtDist(double meters) {
+    return (meters >= 1000)
+        ? '${(meters / 1000).toStringAsFixed(1)} km'
+        : '${meters.toStringAsFixed(0)} m';
+  }
+
+  double? _distanceMetersTo(Bathroom b) {
+    if (_myPos == null) return null;
+    final d = Distance();
+    return d(LatLng(b.lat, b.lon), _myPos!);
+  }
 
   /// Devuelve una lista de baños de prueba (mocks)
   List<Bathroom> _getMockBathrooms() {
@@ -79,10 +101,26 @@ class _MapScreenState extends State<MapScreen> {
   @override
   void initState() {
     super.initState();
-
     _searchController.addListener(_applyFilters);
-
+    _initLocationSilencioso();
     _loadBathrooms();
+  }
+
+  Future<void> _initLocationSilencioso() async {
+    try {
+      var p = await Geolocator.checkPermission();
+      if (p == LocationPermission.denied) {
+        p = await Geolocator.requestPermission();
+      }
+      if (p == LocationPermission.deniedForever ||
+          p == LocationPermission.denied)
+        return;
+
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: _locSettings,
+      );
+      setState(() => _myPos = LatLng(pos.latitude, pos.longitude));
+    } catch (_) {}
   }
 
   Future<void> _loadBathrooms() async {
@@ -152,15 +190,59 @@ class _MapScreenState extends State<MapScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Baño! - Mapeo en Talca')),
-
+      appBar: AppBar(title: Text('TalcaToilet! - Mapeo en Talca')),
       body: _buildBody(),
+
+      floatingActionButton: FloatingActionButton(
+        tooltip: 'Mi ubicación',
+        onPressed: () async {
+          try {
+            if (!await Geolocator.isLocationServiceEnabled()) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Servicio de ubicación deshabilitado'),
+                ),
+              );
+              return;
+            }
+            var p = await Geolocator.checkPermission();
+            if (p == LocationPermission.denied) {
+              p = await Geolocator.requestPermission();
+            }
+            if (p == LocationPermission.deniedForever ||
+                p == LocationPermission.denied) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Permisos de ubicación denegados'),
+                ),
+              );
+              return;
+            }
+            final pos = await Geolocator.getCurrentPosition(
+              locationSettings: _locSettings,
+            );
+            setState(() => _myPos = LatLng(pos.latitude, pos.longitude));
+            _mapController.move(_myPos!, 16);
+          } on TimeoutException {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Tiempo de espera agotado obteniendo ubicación'),
+              ),
+            );
+          } catch (_) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('No se pudo obtener tu ubicación')),
+            );
+          }
+        },
+        child: const Icon(Icons.my_location),
+      ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
     );
   }
 
   // Widget para el body
   Widget _buildBody() {
-    // 1. Si está cargando
     if (_isLoading) {
       return LoadingIndicator();
     }
@@ -211,8 +293,9 @@ class _MapScreenState extends State<MapScreen> {
     }).toList();
 
     return FlutterMap(
-      options: MapOptions(
-        initialCenter: LatLng(-35.427, -71.655), // Centro de Talca
+      mapController: _mapController,
+      options: const MapOptions(
+        initialCenter: LatLng(-35.427, -71.655),
         initialZoom: 15.0,
       ),
       children: [
@@ -220,16 +303,25 @@ class _MapScreenState extends State<MapScreen> {
         TileLayer(
           urlTemplate:
               'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
-          subdomains: [
-            'a',
-            'b',
-            'c',
-            'd',
-          ], // Para balancear la carga del servidor
+          subdomains: ['a', 'b', 'c', 'd'],
           userAgentPackageName: 'cl.banoapp.ejemplo',
         ),
 
         _buildAttribution(),
+
+        if (_myPos != null)
+          CircleLayer(
+            circles: [
+              CircleMarker(
+                point: _myPos!,
+                radius: 6,
+                useRadiusInMeter: false,
+                color: Colors.blue.withOpacity(0.8),
+                borderStrokeWidth: 2,
+                borderColor: Colors.white,
+              ),
+            ],
+          ),
 
         // Capa 2: Los marcadores de los baños
         MarkerLayer(markers: markers),
@@ -249,24 +341,72 @@ class _MapScreenState extends State<MapScreen> {
 
   // Muestra la ficha de detalle (HU1)
   void _showBathroomDetails(BuildContext context, Bathroom bathroom) {
+    final distM = _distanceMetersTo(bathroom);
+    final distTxt = (distM == null) ? '–' : _fmtDist(distM);
+
     showModalBottomSheet(
       context: context,
       builder: (bCtx) {
-        return Container(
-          padding: EdgeInsets.all(20),
-          width: double.infinity,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                bathroom.name,
-                style: Theme.of(context).textTheme.headlineSmall,
-              ),
-              SizedBox(height: 10),
-              Text('Gratis: ${bathroom.isFree ? "Sí" : "No"}'),
-              Text('Accesible: ${bathroom.isAccessible ? "Sí" : "No"}'),
-            ],
+        return SafeArea(
+          child: Container(
+            padding: const EdgeInsets.all(20),
+            width: double.infinity,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  bathroom.name,
+                  style: Theme.of(context).textTheme.headlineSmall,
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    const Icon(Icons.place, size: 18),
+                    const SizedBox(width: 6),
+                    Text('Distancia: $distTxt'),
+                    const SizedBox(width: 16),
+                    const Icon(Icons.star, size: 18),
+                    const SizedBox(width: 6),
+                    Text('Rating: 0.0'), // placeholder por ahora
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Text('Gratis: ${bathroom.isFree ? "Sí" : "No"}'),
+                Text('Accesible: ${bathroom.isAccessible ? "Sí" : "No"}'),
+                const SizedBox(height: 12),
+
+                // Acciones HU1
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    FilledButton.icon(
+                      onPressed: () {
+                        // TODO: Navegar a Detalle (pantalla futura)
+                        Navigator.pop(context);
+                      },
+                      icon: const Icon(Icons.info),
+                      label: const Text('Detalle'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () {
+                        // TODO: abrir modal de reseña (HUs futuras)
+                        Navigator.pop(context);
+                      },
+                      icon: const Icon(Icons.rate_review),
+                      label: const Text('Reseñar'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () {
+                        Navigator.pop(context);
+                      },
+                      icon: const Icon(Icons.report),
+                      label: const Text('Reportar'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         );
       },
