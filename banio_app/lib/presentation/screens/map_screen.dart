@@ -1,13 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'dart:async';
+import 'package:connectivity_plus/connectivity_plus.dart';
 
 import '../../domain/entities/bathroom.dart';
 import '../../domain/use_cases/get_bathrooms_usecase.dart';
 import '../widgets/loading_indicator.dart';
 //import 'package:url_launcher/url_launcher.dart';
 
-//import '../widgets/error_message.dart';
+import '../widgets/error_message.dart';
 
 //Importaciones para Inyección de Dependencias
 import '../../data/data_sources/osm_data_source.dart';
@@ -19,8 +21,6 @@ class MapScreen extends StatefulWidget {
 }
 
 class _MapScreenState extends State<MapScreen> {
-  // El 'Future' que alimentará nuestro FutureBuilder
-  //late Future<List<Bathroom>> _bathroomsFuture;
   bool _isLoading = true;
   List<Bathroom> _allBathrooms = []; // Guarda la lista completa
   List<Bathroom> _filteredBathrooms = []; // Guarda la lista filtrada
@@ -70,8 +70,7 @@ class _MapScreenState extends State<MapScreen> {
         tags: {
           'name': 'Baño Plaza de Armas (Prueba)',
           'fee': 'no', // Gratis
-          'toilets:wheelchair':
-              'limited', // No es 'yes', así que no saldrá en filtro "Accesible"
+          'toilets:wheelchair': 'limited',
         },
       ),
     ];
@@ -80,15 +79,13 @@ class _MapScreenState extends State<MapScreen> {
   @override
   void initState() {
     super.initState();
-    // Añadimos un 'listener' al buscador para que filtre mientras escribes
+
     _searchController.addListener(_applyFilters);
 
-    // Llamamos a la función que carga los datos
     _loadBathrooms();
   }
 
   Future<void> _loadBathrooms() async {
-    // --- Inyección de Dependencias (simple) ---
     final OsmDataSource dataSource = OsmDataSource();
     final BathroomRepositoryImpl repository = BathroomRepositoryImpl(
       dataSource: dataSource,
@@ -96,7 +93,6 @@ class _MapScreenState extends State<MapScreen> {
     final GetBathroomsUseCase getBathroomsUseCase = GetBathroomsUseCase(
       repository: repository,
     );
-    // --- Fin Inyección ---
 
     try {
       final apibathrooms = await getBathroomsUseCase.call();
@@ -157,40 +153,48 @@ class _MapScreenState extends State<MapScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: Text('Baño! - Mapeo en Talca')),
-      body: _isLoading
-          ? LoadingIndicator() // Muestra 'cargando' si _isLoading es true
-          : Column(
-              children: [
-                // 1. BARRA DE BÚSQUEDA
-                _buildSearchBar(),
 
-                // 2. FILTROS (Switch)
-                _buildFilterSwitches(),
-
-                // 3. MAPA (Expandido para tomar el espacio restante)
-                Expanded(
-                  child: _buildMap(
-                    _filteredBathrooms,
-                  ), // Pasa la lista FILTRADA
-                ),
-              ],
-            ),
+      body: _buildBody(),
     );
   }
 
-  // Widget que construye el mapa una vez que los datos están listos
+  // Widget para el body
+  Widget _buildBody() {
+    // 1. Si está cargando
+    if (_isLoading) {
+      return LoadingIndicator();
+    }
+
+    return Stack(
+      children: [
+        // Capa 1: El Mapa (ocupa todo el espacio)
+        _buildMap(_filteredBathrooms),
+
+        // Capa 2: Los controles (búsqueda y filtros)
+        Positioned(
+          top: 10.0,
+          left: 10.0,
+          right: 10.0,
+          child: Column(
+            children: [
+              _buildSearchBar(), // Widget de búsqueda modificado
+              SizedBox(height: 8),
+              _buildFilterSwitches(), // Widget de filtros modificado
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildMap(List<Bathroom> bathrooms) {
-    // Convertimos la lista de Baños a una lista de Marcadores (Markers)
     final List<Marker> markers = bathrooms.map((bathroom) {
       return Marker(
         width: 40.0,
         height: 40.0,
         point: LatLng(bathroom.lat, bathroom.lon),
 
-        // --- INICIA CORRECCIÓN ---
-        // Cambiamos 'builder:' por 'child:'
         child: IconButton(
-          // --- TERMINA CORRECCIÓN ---
           icon: Icon(
             Icons.wc,
             color: bathroom.isAccessible
@@ -225,7 +229,6 @@ class _MapScreenState extends State<MapScreen> {
           userAgentPackageName: 'cl.banoapp.ejemplo',
         ),
 
-        // ¡IMPORTANTE! Debes añadir la atribución (créditos)
         _buildAttribution(),
 
         // Capa 2: Los marcadores de los baños
@@ -236,12 +239,9 @@ class _MapScreenState extends State<MapScreen> {
 
   Widget _buildAttribution() {
     return RichAttributionWidget(
-      alignment: AttributionAlignment.bottomRight, // ← aquí el enum correcto
+      alignment: AttributionAlignment.bottomRight,
       attributions: [
-        TextSourceAttribution(
-          '© OpenStreetMap contributors',
-          // onTap opcional si usas url_launcher
-        ),
+        TextSourceAttribution('© OpenStreetMap contributors'),
         TextSourceAttribution('© CARTO'),
       ],
     );
@@ -266,7 +266,6 @@ class _MapScreenState extends State<MapScreen> {
               SizedBox(height: 10),
               Text('Gratis: ${bathroom.isFree ? "Sí" : "No"}'),
               Text('Accesible: ${bathroom.isAccessible ? "Sí" : "No"}'),
-              // Aquí irían los botones de HU1 (Detalle, Reseñar, Reportar)
             ],
           ),
         );
@@ -276,21 +275,25 @@ class _MapScreenState extends State<MapScreen> {
 
   // Widget para la barra de búsqueda
   Widget _buildSearchBar() {
-    return Padding(
-      padding: const EdgeInsets.all(8.0),
-      child: TextField(
-        controller: _searchController,
-        decoration: InputDecoration(
-          labelText: 'Buscar por nombre...',
-          prefixIcon: Icon(Icons.search),
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12.0)),
+    return Card(
+      color: Colors.white.withOpacity(0.9),
+      elevation: 4.0,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12.0)),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8.0),
+        child: TextField(
+          controller: _searchController,
+          decoration: InputDecoration(
+            hintText: 'Buscar por nombre...',
+            prefixIcon: Icon(Icons.search),
+
+            border: InputBorder.none,
+          ),
         ),
-        // onChanged: (value) => _applyFilters(), // 'addListener' ya hace esto
       ),
     );
   }
 
-  // Widget para los switches de filtro
   Widget _buildFilterSwitches() {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -303,8 +306,11 @@ class _MapScreenState extends State<MapScreen> {
             setState(() {
               _filterFree = value;
             });
-            _applyFilters(); // Vuelve a filtrar
+            _applyFilters();
           },
+          // Fondo semi-transparente
+          backgroundColor: Colors.white.withOpacity(0.9),
+          selectedColor: Colors.blue.withOpacity(0.8),
         ),
 
         // Filtro "Accesible"
@@ -315,8 +321,11 @@ class _MapScreenState extends State<MapScreen> {
             setState(() {
               _filterAccessible = value;
             });
-            _applyFilters(); // Vuelve a filtrar
+            _applyFilters();
           },
+          // Fondo semi-transparente
+          backgroundColor: Colors.white.withOpacity(0.9),
+          selectedColor: Colors.blue.withOpacity(0.8),
         ),
       ],
     );
