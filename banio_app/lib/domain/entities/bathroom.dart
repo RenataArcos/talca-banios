@@ -14,14 +14,14 @@ class Bathroom {
   /// Helper para obtener el nombre de forma segura
   String get name => tags['name'] ?? 'Baño sin nombre';
 
-  /// Helper para verificar si es gratis (implementa HU2)
+  /// Helper para verificar si es gratis
   bool get isFree {
     final fee = tags['fee'];
     if (fee == 'no') return true;
     return false;
   }
 
-  /// Helper para verificar accesibilidad (implementa HU2)
+  /// Helper para verificar accesibilidad
   bool get isAccessible {
     final wheelchair = tags['toilets:wheelchair'];
     if (wheelchair == 'yes') return true;

@@ -2,23 +2,29 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'dart:async';
-//import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../../domain/entities/bathroom.dart';
 import '../../domain/use_cases/get_bathrooms_usecase.dart';
 import '../widgets/loading_indicator.dart';
-//import 'package:url_launcher/url_launcher.dart';
-
-//import '../widgets/error_message.dart';
-
-//Importaciones para Inyección de Dependencias
 import '../../data/data_sources/osm_data_source.dart';
 import '../../data/repositories/bathroom_repository_impl.dart';
 
 class MapScreen extends StatefulWidget {
   @override
   _MapScreenState createState() => _MapScreenState();
+}
+
+const LatLng _kTalcaCenter = LatLng(-35.427, -71.655);
+const double _kTalcaZoom = 15.0;
+const double _kUserZoom = 16.0;
+// Radio de aceptación para “estoy en Talca”
+const double _kTalcaRadiusM = 12000; // 12 km ~ área urbana
+
+bool _isInTalca(LatLng pos) {
+  final d = Distance();
+  final m = d(_kTalcaCenter, pos);
+  return m <= _kTalcaRadiusM;
 }
 
 class _MapScreenState extends State<MapScreen> {
@@ -102,25 +108,138 @@ class _MapScreenState extends State<MapScreen> {
   void initState() {
     super.initState();
     _searchController.addListener(_applyFilters);
-    _initLocationSilencioso();
+    _centerOnStartup();
     _loadBathrooms();
   }
 
-  Future<void> _initLocationSilencioso() async {
+  Future<void> _centerOnStartup() async {
     try {
+      // Intento “silencioso”: si está denegado, no muestra diálogos
       var p = await Geolocator.checkPermission();
       if (p == LocationPermission.denied) {
-        p = await Geolocator.requestPermission();
+        p = await Geolocator.requestPermission(); // intenta una vez
       }
-      if (p == LocationPermission.deniedForever ||
-          p == LocationPermission.denied)
-        return;
 
-      final pos = await Geolocator.getCurrentPosition(
-        locationSettings: _locSettings,
-      );
-      setState(() => _myPos = LatLng(pos.latitude, pos.longitude));
+      if (p == LocationPermission.whileInUse ||
+          p == LocationPermission.always) {
+        final pos = await Geolocator.getCurrentPosition(
+          locationSettings: _locSettings,
+        );
+        final here = LatLng(pos.latitude, pos.longitude);
+        setState(() => _myPos = here);
+
+        // Si estoy en Talca, centro en mi posición; si no, centro en Talca
+        if (_isInTalca(here)) {
+          _mapController.move(here, _kUserZoom);
+        } else {
+          _mapController.move(_kTalcaCenter, _kTalcaZoom);
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Fuera de Talca: centrado en Talca'),
+              ),
+            );
+          }
+        }
+        return;
+      }
     } catch (_) {}
+    // En caso de error o permisos denegados, centro en Talca
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _mapController.move(_kTalcaCenter, _kTalcaZoom);
+    });
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Sin ubicación: centrado en Talca')),
+      );
+    }
+  }
+
+  Future<bool> _ensureLocationPermissionSmart({bool interactive = true}) async {
+    // 1) Servicio de ubicación (GPS) encendido
+    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      if (interactive && mounted) {
+        final go = await showDialog<bool>(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text('Ubicación desactivada'),
+            content: const Text(
+              'Activa el servicio de ubicación para centrar el mapa.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancelar'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Abrir ajustes'),
+              ),
+            ],
+          ),
+        );
+        if (go == true) {
+          await Geolocator.openLocationSettings();
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Servicio de ubicación deshabilitado'),
+            ),
+          );
+        }
+      }
+      return false;
+    }
+
+    // 2) Permiso
+    var perm = await Geolocator.checkPermission();
+    if (perm == LocationPermission.denied) {
+      perm = await Geolocator.requestPermission();
+    }
+
+    // 3) Denegado para siempre → ofrecer ir a Configuración de la app
+    if (perm == LocationPermission.deniedForever) {
+      if (interactive && mounted) {
+        final go = await showDialog<bool>(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text('Permiso requerido'),
+            content: const Text(
+              'Para centrar el mapa en tu posición, concede el permiso de ubicación en la configuración de la app.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancelar'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Abrir configuración'),
+              ),
+            ],
+          ),
+        );
+        if (go == true) {
+          await Geolocator.openAppSettings();
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Permiso de ubicación denegado permanentemente'),
+            ),
+          );
+        }
+      }
+      return false;
+    }
+
+    // 4) Concedido
+    return perm == LocationPermission.whileInUse ||
+        perm == LocationPermission.always;
   }
 
   Future<void> _loadBathrooms() async {
@@ -197,46 +316,38 @@ class _MapScreenState extends State<MapScreen> {
         tooltip: 'Mi ubicación',
         onPressed: () async {
           try {
-            if (!await Geolocator.isLocationServiceEnabled()) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Servicio de ubicación deshabilitado'),
-                ),
-              );
-              return;
-            }
-            var p = await Geolocator.checkPermission();
-            if (p == LocationPermission.denied) {
-              p = await Geolocator.requestPermission();
-            }
-            if (p == LocationPermission.deniedForever ||
-                p == LocationPermission.denied) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Permisos de ubicación denegados'),
-                ),
-              );
-              return;
-            }
+            final ok = await _ensureLocationPermissionSmart(interactive: true);
+            if (!ok) return;
+
             final pos = await Geolocator.getCurrentPosition(
               locationSettings: _locSettings,
             );
+            if (!mounted) return;
             setState(() => _myPos = LatLng(pos.latitude, pos.longitude));
             _mapController.move(_myPos!, 16);
           } on TimeoutException {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Tiempo de espera agotado obteniendo ubicación'),
-              ),
-            );
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text(
+                    'Tiempo de espera agotado obteniendo ubicación',
+                  ),
+                ),
+              );
+            }
           } catch (_) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('No se pudo obtener tu ubicación')),
-            );
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('No se pudo obtener tu ubicación'),
+                ),
+              );
+            }
           }
         },
         child: const Icon(Icons.my_location),
       ),
+
       floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
     );
   }
@@ -295,8 +406,8 @@ class _MapScreenState extends State<MapScreen> {
     return FlutterMap(
       mapController: _mapController,
       options: const MapOptions(
-        initialCenter: LatLng(-35.427, -71.655),
-        initialZoom: 15.0,
+        initialCenter: _kTalcaCenter,
+        initialZoom: _kTalcaZoom,
       ),
       children: [
         // Capa 1: El mapa base
