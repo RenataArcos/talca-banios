@@ -3,6 +3,8 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'dart:async';
 import 'package:geolocator/geolocator.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 
 import '../../domain/entities/bathroom.dart';
 import '../../domain/use_cases/get_bathrooms_usecase.dart';
@@ -269,9 +271,301 @@ class _MapScreenState extends State<MapScreen> {
     }
   }
 
+  String _safeInitial(User u) {
+    String? s = u.displayName?.trim();
+    if (s == null || s.isEmpty) s = u.email?.trim();
+    if (s == null || s.isEmpty) return 'U';
+    // Si quieres soportar emojis/acentos mejor, usa package:characters.
+    return s.substring(0, 1).toUpperCase();
+  }
+
+  String _safeTitle(User u) {
+    final dn = u.displayName?.trim();
+    if (dn != null && dn.isNotEmpty) return dn;
+    final em = u.email?.trim();
+    if (em != null && em.isNotEmpty) return em;
+    return '(sin nombre)';
+  }
+
+  final _auth = FirebaseAuth.instance;
+
+  // controladores del form
+  final _emailCtrl = TextEditingController();
+  final _passCtrl = TextEditingController();
+  bool _authLoading = false;
+
+  Future<User?> _signInEmail(String email, String pass) async {
+    final cred = await _auth.signInWithEmailAndPassword(
+      email: email,
+      password: pass,
+    );
+    return cred.user;
+  }
+
+  Future<User?> _signUpEmail(String email, String pass) async {
+    final cred = await _auth.createUserWithEmailAndPassword(
+      email: email,
+      password: pass,
+    );
+    return cred.user;
+  }
+
+  Future<User?> _signInGoogle() async {
+    final googleUser = await GoogleSignIn().signIn();
+    if (googleUser == null) return null; // cancelado
+    final auth = await googleUser.authentication;
+    final credential = GoogleAuthProvider.credential(
+      idToken: auth.idToken,
+      accessToken: auth.accessToken,
+    );
+    final cred = await _auth.signInWithCredential(credential);
+    return cred.user;
+  }
+
+  Future<void> _signOut() async {
+    try {
+      await GoogleSignIn().signOut();
+    } catch (_) {}
+    await _auth.signOut();
+  }
+
+  Future<void> _openAuthSheet() async {
+    final user = _auth.currentUser;
+    if (user != null) {
+      // Ya logueado: mostrar perfil + salir
+      await showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        builder: (_) {
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      CircleAvatar(
+                        radius: 22,
+                        backgroundImage:
+                            (user.photoURL != null && user.photoURL!.isNotEmpty)
+                            ? NetworkImage(user.photoURL!)
+                            : null,
+                        child: (user.photoURL == null || user.photoURL!.isEmpty)
+                            ? Text(_safeInitial(user))
+                            : null,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          _safeTitle(user),
+                          style: Theme.of(context).textTheme.titleMedium,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'UID: ${user.uid}',
+                    style: const TextStyle(fontSize: 12, color: Colors.black54),
+                  ),
+                  const SizedBox(height: 16),
+                  FilledButton.icon(
+                    onPressed: () async {
+                      await _signOut();
+                      if (mounted) Navigator.pop(context);
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Sesión cerrada')),
+                        );
+                        setState(() {});
+                      }
+                    },
+                    icon: const Icon(Icons.logout),
+                    label: const Text('Cerrar sesión'),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+      return;
+    }
+
+    // No logueado: login / registro
+    bool isLogin = true;
+    _emailCtrl.text = '';
+    _passCtrl.text = '';
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) {
+        return SafeArea(
+          child: Padding(
+            padding: EdgeInsets.only(
+              left: 20,
+              right: 20,
+              top: 20,
+              bottom: 20 + MediaQuery.of(context).viewInsets.bottom,
+            ),
+            child: StatefulBuilder(
+              builder: (ctx, setModal) {
+                Future<void> doSubmit() async {
+                  setModal(() => _authLoading = true);
+                  try {
+                    User? u;
+                    final email = _emailCtrl.text.trim();
+                    final pass = _passCtrl.text.trim();
+                    if (isLogin) {
+                      u = await _signInEmail(email, pass);
+                    } else {
+                      u = await _signUpEmail(email, pass);
+                    }
+                    if (u != null && mounted) {
+                      Navigator.pop(context);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            isLogin ? 'Sesión iniciada' : 'Cuenta creada',
+                          ),
+                        ),
+                      );
+                      setState(() {}); // refresca para que FAB muestre estado
+                    }
+                  } on FirebaseAuthException catch (e) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(e.message ?? 'Error de autenticación'),
+                      ),
+                    );
+                  } finally {
+                    setModal(() => _authLoading = false);
+                  }
+                }
+
+                return SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Text(
+                            isLogin ? 'Iniciar sesión' : 'Crear cuenta',
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                          const Spacer(),
+                          TextButton(
+                            onPressed: () => setModal(() => isLogin = !isLogin),
+                            child: Text(
+                              isLogin
+                                  ? '¿No tienes cuenta? Regístrate'
+                                  : '¿Ya tienes cuenta? Inicia sesión',
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: _emailCtrl,
+                        keyboardType: TextInputType.emailAddress,
+                        decoration: const InputDecoration(
+                          labelText: 'Email',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: _passCtrl,
+                        obscureText: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Contraseña',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.icon(
+                          onPressed: _authLoading ? null : doSubmit,
+                          icon: _authLoading
+                              ? const SizedBox(
+                                  height: 16,
+                                  width: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.email),
+                          label: Text(
+                            isLogin ? 'Entrar con email' : 'Crear cuenta',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: _authLoading
+                              ? null
+                              : () async {
+                                  setModal(() => _authLoading = true);
+                                  try {
+                                    final u = await _signInGoogle();
+                                    if (u != null && mounted) {
+                                      Navigator.pop(context);
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
+                                        const SnackBar(
+                                          content: Text(
+                                            'Sesión iniciada con Google',
+                                          ),
+                                        ),
+                                      );
+                                      setState(() {});
+                                    }
+                                  } on FirebaseAuthException catch (e) {
+                                    if (mounted) {
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            e.message ?? 'Error con Google',
+                                          ),
+                                        ),
+                                      );
+                                    }
+                                  } finally {
+                                    setModal(() => _authLoading = false);
+                                  }
+                                },
+                          icon: const Icon(Icons.g_mobiledata),
+                          label: const Text('Continuar con Google'),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   void dispose() {
+    _searchController.removeListener(_applyFilters);
     _searchController.dispose();
+    _emailCtrl.dispose();
+    _passCtrl.dispose();
     super.dispose();
   }
 
@@ -312,42 +606,60 @@ class _MapScreenState extends State<MapScreen> {
       appBar: AppBar(title: Text('TalcaToilet! - Mapeo en Talca')),
       body: _buildBody(),
 
-      floatingActionButton: FloatingActionButton(
-        tooltip: 'Mi ubicación',
-        onPressed: () async {
-          try {
-            final ok = await _ensureLocationPermissionSmart(interactive: true);
-            if (!ok) return;
-
-            final pos = await Geolocator.getCurrentPosition(
-              locationSettings: _locSettings,
-            );
-            if (!mounted) return;
-            setState(() => _myPos = LatLng(pos.latitude, pos.longitude));
-            _mapController.move(_myPos!, 16);
-          } on TimeoutException {
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text(
-                    'Tiempo de espera agotado obteniendo ubicación',
-                  ),
-                ),
-              );
-            }
-          } catch (_) {
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('No se pudo obtener tu ubicación'),
-                ),
-              );
-            }
-          }
-        },
-        child: const Icon(Icons.my_location),
+      floatingActionButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          // FAB Cuenta (arriba)
+          FloatingActionButton.extended(
+            heroTag: 'fab-auth',
+            onPressed: _openAuthSheet,
+            icon: Icon(
+              _auth.currentUser == null ? Icons.person : Icons.verified_user,
+            ),
+            label: Text(_auth.currentUser == null ? 'Entrar' : 'Cuenta'),
+          ),
+          const SizedBox(height: 12),
+          // FAB Ubicación (abajo)
+          FloatingActionButton(
+            heroTag: 'fab-location',
+            tooltip: 'Mi ubicación',
+            onPressed: () async {
+              try {
+                final ok = await _ensureLocationPermissionSmart(
+                  interactive: true,
+                );
+                if (!ok) return;
+                final pos = await Geolocator.getCurrentPosition(
+                  locationSettings: _locSettings,
+                );
+                if (!mounted) return;
+                setState(() => _myPos = LatLng(pos.latitude, pos.longitude));
+                _mapController.move(_myPos!, _kUserZoom);
+              } on TimeoutException {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                        'Tiempo de espera agotado obteniendo ubicación',
+                      ),
+                    ),
+                  );
+                }
+              } catch (_) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('No se pudo obtener tu ubicación'),
+                    ),
+                  );
+                }
+              }
+            },
+            child: const Icon(Icons.my_location),
+          ),
+        ],
       ),
-
       floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
     );
   }
