@@ -488,6 +488,60 @@ class _MapScreenState extends State<MapScreen> {
                         ],
                       ),
                       const SizedBox(height: 8),
+
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.icon(
+                          onPressed: _authLoading
+                              ? null
+                              : () async {
+                                  setModal(() {
+                                    _authLoading = true;
+                                    err = '';
+                                  });
+                                  try {
+                                    final u = await _signInGoogle();
+                                    if (u != null && mounted) {
+                                      Navigator.pop(context);
+                                      _showSnack('Sesión iniciada con Google');
+                                      setState(() {});
+                                    }
+                                  } on FirebaseAuthException catch (e) {
+                                    _showSnack(_mapAuthError(e));
+                                  } catch (_) {
+                                    _showSnack(
+                                      'No se pudo iniciar sesión con Google.',
+                                    );
+                                  } finally {
+                                    setModal(() => _authLoading = false);
+                                  }
+                                },
+                          icon: _authLoading
+                              ? const SizedBox(
+                                  height: 16,
+                                  width: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.g_mobiledata),
+                          label: const Text('Continuar con Google'),
+                        ),
+                      ),
+
+                      const SizedBox(height: 8),
+                      Row(
+                        children: const [
+                          Expanded(child: Divider()),
+                          Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 8),
+                            child: Text('o con correo'),
+                          ),
+                          Expanded(child: Divider()),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+
                       TextField(
                         controller: _emailCtrl,
                         keyboardType: TextInputType.emailAddress,
@@ -505,75 +559,26 @@ class _MapScreenState extends State<MapScreen> {
                           border: OutlineInputBorder(),
                         ),
                       ),
-                      if (err != '') ...[
+
+                      if (err.isNotEmpty) ...[
                         const SizedBox(height: 8),
                         Text(err, style: const TextStyle(color: Colors.red)),
                       ],
+
                       const SizedBox(height: 12),
-                      SizedBox(
-                        width: double.infinity,
-                        child: FilledButton.icon(
-                          onPressed: () {
-                            if (_authLoading) return;
-                            doSubmit();
-                            err = '';
-                          },
-                          icon: _authLoading
-                              ? const SizedBox(
-                                  height: 16,
-                                  width: 16,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                  ),
-                                )
-                              : const Icon(Icons.email),
-                          label: Text(
-                            isLogin ? 'Entrar con correo' : 'Crear cuenta',
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
                       SizedBox(
                         width: double.infinity,
                         child: OutlinedButton.icon(
                           onPressed: _authLoading
                               ? null
-                              : () async {
+                              : () {
                                   err = '';
-                                  setModal(() => _authLoading = true);
-                                  try {
-                                    final u = await _signInGoogle();
-                                    if (u != null && mounted) {
-                                      Navigator.pop(context);
-                                      ScaffoldMessenger.of(
-                                        context,
-                                      ).showSnackBar(
-                                        const SnackBar(
-                                          content: Text(
-                                            'Sesión iniciada con Google',
-                                          ),
-                                        ),
-                                      );
-                                      setState(() {});
-                                    }
-                                  } on FirebaseAuthException catch (e) {
-                                    if (mounted) {
-                                      ScaffoldMessenger.of(
-                                        context,
-                                      ).showSnackBar(
-                                        SnackBar(
-                                          content: Text(
-                                            e.message ?? 'Error con Google',
-                                          ),
-                                        ),
-                                      );
-                                    }
-                                  } finally {
-                                    setModal(() => _authLoading = false);
-                                  }
+                                  doSubmit();
                                 },
-                          icon: const Icon(Icons.g_mobiledata),
-                          label: const Text('Continuar con Google'),
+                          icon: const Icon(Icons.email),
+                          label: Text(
+                            isLogin ? 'Entrar con correo' : 'Crear cuenta',
+                          ),
                         ),
                       ),
                     ],
