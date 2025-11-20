@@ -592,6 +592,24 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
+  Future<void> _requireAuthOrLogin(VoidCallback onAuthenticated) async {
+    if (_auth.currentUser == null) {
+      if (mounted) Navigator.pop(context);
+      await _openAuthSheet();
+
+      if (!mounted) return;
+      if (_auth.currentUser != null) {
+        onAuthenticated();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Inicia sesión para continuar')),
+        );
+      }
+    } else {
+      onAuthenticated();
+    }
+  }
+
   @override
   void dispose() {
     _searchController.removeListener(_applyFilters);
@@ -817,15 +835,24 @@ class _MapScreenState extends State<MapScreen> {
                     ),
                     OutlinedButton.icon(
                       onPressed: () {
-                        // TODO: abrir modal de reseña (HUs futuras)
-                        Navigator.pop(context);
+                        _requireAuthOrLogin(() {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Abriendo reseña...')),
+                          );
+                        });
                       },
                       icon: const Icon(Icons.rate_review),
                       label: const Text('Reseñar'),
                     ),
                     OutlinedButton.icon(
                       onPressed: () {
-                        Navigator.pop(context);
+                        _requireAuthOrLogin(() {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Abriendo reporte...'),
+                            ),
+                          );
+                        });
                       },
                       icon: const Icon(Icons.report),
                       label: const Text('Reportar'),
