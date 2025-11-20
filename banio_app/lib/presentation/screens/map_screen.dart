@@ -34,6 +34,32 @@ class _MapScreenState extends State<MapScreen> {
   List<Bathroom> _allBathrooms = []; // Guarda la lista completa
   List<Bathroom> _filteredBathrooms = []; // Guarda la lista filtrada
 
+  String err = '';
+
+  String _mapAuthError(FirebaseAuthException e) {
+    switch (e.code) {
+      case 'email-already-in-use':
+        return 'Ese correo ya está registrado.';
+      case 'invalid-email':
+        return 'Correo inválido.';
+      case 'weak-password':
+        return 'La contraseña es muy débil.';
+      case 'user-not-found':
+        return 'No existe una cuenta con ese correo.';
+      case 'wrong-password':
+        return 'Contraseña incorrecta.';
+      case 'invalid-credential':
+        return 'Credenciales inválidas.';
+      default:
+        return e.message ?? 'Error de autenticación.';
+    }
+  }
+
+  void _showSnack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
   // Controladores para los filtros
   final TextEditingController _searchController = TextEditingController();
   bool _filterFree = false;
@@ -259,14 +285,13 @@ class _MapScreenState extends State<MapScreen> {
       final bathrooms = [...apibathrooms, ...fakebathrooms];
       setState(() {
         _allBathrooms = bathrooms;
-        _filteredBathrooms = bathrooms; // Al inicio, ambas listas son iguales
+        _filteredBathrooms = bathrooms;
         _isLoading = false;
       });
     } catch (e) {
       print(e);
       setState(() {
         _isLoading = false;
-        // Aquí podrías mostrar un error
       });
     }
   }
@@ -366,11 +391,7 @@ class _MapScreenState extends State<MapScreen> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 12),
-                  Text(
-                    'UID: ${user.uid}',
-                    style: const TextStyle(fontSize: 12, color: Colors.black54),
-                  ),
+
                   const SizedBox(height: 16),
                   FilledButton.icon(
                     onPressed: () async {
@@ -427,21 +448,13 @@ class _MapScreenState extends State<MapScreen> {
                     }
                     if (u != null && mounted) {
                       Navigator.pop(context);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            isLogin ? 'Sesión iniciada' : 'Cuenta creada',
-                          ),
-                        ),
-                      );
-                      setState(() {}); // refresca para que FAB muestre estado
+                      _showSnack(isLogin ? 'Sesión iniciada' : 'Cuenta creada');
+                      setState(() {});
                     }
                   } on FirebaseAuthException catch (e) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(e.message ?? 'Error de autenticación'),
-                      ),
-                    );
+                    setModal(() {
+                      err = _mapAuthError(e);
+                    });
                   } finally {
                     setModal(() => _authLoading = false);
                   }
@@ -460,7 +473,12 @@ class _MapScreenState extends State<MapScreen> {
                           ),
                           const Spacer(),
                           TextButton(
-                            onPressed: () => setModal(() => isLogin = !isLogin),
+                            onPressed: () {
+                              setModal(() {
+                                isLogin = !isLogin;
+                                err = '';
+                              });
+                            },
                             child: Text(
                               isLogin
                                   ? '¿No tienes cuenta? Regístrate'
@@ -474,7 +492,7 @@ class _MapScreenState extends State<MapScreen> {
                         controller: _emailCtrl,
                         keyboardType: TextInputType.emailAddress,
                         decoration: const InputDecoration(
-                          labelText: 'Email',
+                          labelText: 'Correo',
                           border: OutlineInputBorder(),
                         ),
                       ),
@@ -487,11 +505,19 @@ class _MapScreenState extends State<MapScreen> {
                           border: OutlineInputBorder(),
                         ),
                       ),
+                      if (err != '') ...[
+                        const SizedBox(height: 8),
+                        Text(err, style: const TextStyle(color: Colors.red)),
+                      ],
                       const SizedBox(height: 12),
                       SizedBox(
                         width: double.infinity,
                         child: FilledButton.icon(
-                          onPressed: _authLoading ? null : doSubmit,
+                          onPressed: () {
+                            if (_authLoading) return;
+                            doSubmit();
+                            err = '';
+                          },
                           icon: _authLoading
                               ? const SizedBox(
                                   height: 16,
@@ -502,7 +528,7 @@ class _MapScreenState extends State<MapScreen> {
                                 )
                               : const Icon(Icons.email),
                           label: Text(
-                            isLogin ? 'Entrar con email' : 'Crear cuenta',
+                            isLogin ? 'Entrar con correo' : 'Crear cuenta',
                           ),
                         ),
                       ),
@@ -513,6 +539,7 @@ class _MapScreenState extends State<MapScreen> {
                           onPressed: _authLoading
                               ? null
                               : () async {
+                                  err = '';
                                   setModal(() => _authLoading = true);
                                   try {
                                     final u = await _signInGoogle();
@@ -603,62 +630,34 @@ class _MapScreenState extends State<MapScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('TalcaToilet! - Mapeo en Talca')),
-      body: _buildBody(),
-
-      floatingActionButton: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          // FAB Cuenta (arriba)
-          FloatingActionButton.extended(
-            heroTag: 'fab-auth',
-            onPressed: _openAuthSheet,
+      appBar: AppBar(
+        title: const Text('TalcaToilet! - Mapeo en Talca'),
+        actions: [
+          IconButton(
+            tooltip: (_auth.currentUser == null) ? 'Iniciar sesión' : 'Cuenta',
             icon: Icon(
-              _auth.currentUser == null ? Icons.person : Icons.verified_user,
+              _auth.currentUser == null ? Icons.login : Icons.verified_user,
             ),
-            label: Text(_auth.currentUser == null ? 'Entrar' : 'Cuenta'),
-          ),
-          const SizedBox(height: 12),
-          // FAB Ubicación (abajo)
-          FloatingActionButton(
-            heroTag: 'fab-location',
-            tooltip: 'Mi ubicación',
-            onPressed: () async {
-              try {
-                final ok = await _ensureLocationPermissionSmart(
-                  interactive: true,
-                );
-                if (!ok) return;
-                final pos = await Geolocator.getCurrentPosition(
-                  locationSettings: _locSettings,
-                );
-                if (!mounted) return;
-                setState(() => _myPos = LatLng(pos.latitude, pos.longitude));
-                _mapController.move(_myPos!, _kUserZoom);
-              } on TimeoutException {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text(
-                        'Tiempo de espera agotado obteniendo ubicación',
-                      ),
-                    ),
-                  );
-                }
-              } catch (_) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('No se pudo obtener tu ubicación'),
-                    ),
-                  );
-                }
-              }
-            },
-            child: const Icon(Icons.my_location),
+            onPressed: _openAuthSheet, // abre el popup de login/registro
           ),
         ],
+      ),
+      body: _buildBody(),
+
+      floatingActionButton: FloatingActionButton(
+        heroTag: 'fab-location',
+        tooltip: 'Mi ubicación',
+        onPressed: () async {
+          final ok = await _ensureLocationPermissionSmart(interactive: true);
+          if (!ok) return;
+          final pos = await Geolocator.getCurrentPosition(
+            locationSettings: _locSettings,
+          );
+          if (!mounted) return;
+          setState(() => _myPos = LatLng(pos.latitude, pos.longitude));
+          _mapController.move(_myPos!, _kUserZoom);
+        },
+        child: const Icon(Icons.my_location),
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
     );
