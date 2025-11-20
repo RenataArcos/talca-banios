@@ -1,0 +1,76 @@
+{
+  "project_info": {
+    "project_number": "261945321019",
+    "project_id": "proyecto-prueba-49cdc",
+    "storage_bucket": "proyecto-prueba-49cdc.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:261945321019:android:d30eb04cf0a2ad40ca9e1e",
+        "android_client_info": {
+          "package_name": "cl.utalca.tds_chat"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "261945321019-m92darhc6uuvig0v96pboio4ids606hp.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCZ31yJhKewL_fOO9ZClPeYZaDv_lMvT88"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "261945321019-m92darhc6uuvig0v96pboio4ids606hp.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:261945321019:android:4504154c9b719d90ca9e1e",
+        "android_client_info": {
+          "package_name": "com.example.banio_app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "261945321019-f7roqf8cdiibv6mlbvesv9qclefsct60.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.banio_app",
+            "certificate_hash": "a5ff86760ceeba0925edf3dd5dc0caecc92b84ab"
+          }
+        },
+        {
+          "client_id": "261945321019-m92darhc6uuvig0v96pboio4ids606hp.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCZ31yJhKewL_fOO9ZClPeYZaDv_lMvT88"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "261945321019-m92darhc6uuvig0v96pboio4ids606hp.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
