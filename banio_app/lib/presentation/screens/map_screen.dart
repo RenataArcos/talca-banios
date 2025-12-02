@@ -1,636 +1,139 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
-import 'dart:async';
 import 'package:geolocator/geolocator.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:google_sign_in/google_sign_in.dart';
+import 'package:latlong2/latlong.dart';
 
-import '../../domain/entities/bathroom.dart';
-import '../../domain/use_cases/get_bathrooms_usecase.dart';
-import '../widgets/loading_indicator.dart';
-import '../../data/data_sources/osm_data_source.dart';
+import '../../core/utils/auth_service.dart';
+import '../../core/utils/locations_utils.dart';
+import '../widgets/auth_sheet.dart';
+import '../widgets/search_bar.dart';
+import '../widgets/filter_chips.dart';
+import '../widgets/bathroom_sheet.dart';
+
+import '../../data/models/bathroom_model.dart';
 import '../../data/repositories/bathroom_repository_impl.dart';
+import '../../domain/entities/bathroom.dart';
+import '../widgets/review_sheet.dart';
+import '../widgets/bathroom_detail_sheet.dart';
 
 class MapScreen extends StatefulWidget {
+  const MapScreen({super.key});
   @override
-  _MapScreenState createState() => _MapScreenState();
-}
-
-const LatLng _kTalcaCenter = LatLng(-35.427, -71.655);
-const double _kTalcaZoom = 15.0;
-const double _kUserZoom = 16.0;
-// Radio de aceptación para “estoy en Talca”
-const double _kTalcaRadiusM = 12000; // 12 km ~ área urbana
-
-bool _isInTalca(LatLng pos) {
-  final d = Distance();
-  final m = d(_kTalcaCenter, pos);
-  return m <= _kTalcaRadiusM;
+  State<MapScreen> createState() => _MapScreenState();
 }
 
 class _MapScreenState extends State<MapScreen> {
+  final _auth = AuthService();
+
+  // estado
   bool _isLoading = true;
-  List<Bathroom> _allBathrooms = []; // Guarda la lista completa
-  List<Bathroom> _filteredBathrooms = []; // Guarda la lista filtrada
+  final TextEditingController _search = TextEditingController();
+  bool _free = false, _accessible = false;
+  final MapController _map = MapController();
+  LatLng? _me;
 
-  String err = '';
-
-  String _mapAuthError(FirebaseAuthException e) {
-    switch (e.code) {
-      case 'email-already-in-use':
-        return 'Ese correo ya está registrado.';
-      case 'invalid-email':
-        return 'Correo inválido.';
-      case 'weak-password':
-        return 'La contraseña es muy débil.';
-      case 'user-not-found':
-        return 'No existe una cuenta con ese correo.';
-      case 'wrong-password':
-        return 'Contraseña incorrecta.';
-      case 'invalid-credential':
-        return 'Credenciales inválidas.';
-      default:
-        return e.message ?? 'Error de autenticación.';
-    }
-  }
-
-  void _showSnack(String msg) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
-  }
-
-  // Controladores para los filtros
-  final TextEditingController _searchController = TextEditingController();
-  bool _filterFree = false;
-  bool _filterAccessible = false;
-
-  final LocationSettings _locSettings = const LocationSettings(
-    accuracy: LocationAccuracy.high,
-    distanceFilter: 0,
-    timeLimit: Duration(seconds: 8),
-  );
-
-  final MapController _mapController = MapController();
-  LatLng? _myPos;
-
-  String _fmtDist(double meters) {
-    return (meters >= 1000)
-        ? '${(meters / 1000).toStringAsFixed(1)} km'
-        : '${meters.toStringAsFixed(0)} m';
-  }
-
-  double? _distanceMetersTo(Bathroom b) {
-    if (_myPos == null) return null;
-    final d = Distance();
-    return d(LatLng(b.lat, b.lon), _myPos!);
-  }
-
-  /// Devuelve una lista de baños de prueba (mocks)
-  List<Bathroom> _getMockBathrooms() {
-    return [
-      Bathroom(
-        id: 1001,
-        lat: -35.428, // Cerca del centro
-        lon: -71.655,
-        tags: {
-          'name': 'Baño Mall Plaza (Prueba)',
-          'fee': 'no', // Para probar filtro "Gratis"
-          'toilets:wheelchair': 'yes', // Para probar "Accesible"
-        },
-      ),
-      Bathroom(
-        id: 1002,
-        lat: -35.425,
-        lon: -71.652,
-        tags: {
-          'name': 'Baño Municipal (Prueba)',
-          'fee': 'yes', // Para probar filtro "De Pago"
-          'toilets:wheelchair': 'no', // Para probar "No Accesible"
-        },
-      ),
-      Bathroom(
-        id: 1003,
-        lat: -35.426,
-        lon: -71.658,
-        tags: {
-          'name': 'Baños Café del Parque (Prueba)',
-          'fee': 'yes', // De Pago
-          'toilets:wheelchair': 'yes', // Accesible
-        },
-      ),
-      Bathroom(
-        id: 1004,
-        lat: -35.430,
-        lon: -71.650,
-        tags: {
-          'name': 'Baño Plaza de Armas (Prueba)',
-          'fee': 'no', // Gratis
-          'toilets:wheelchair': 'limited',
-        },
-      ),
-    ];
-  }
+  List<Bathroom> _all = [], _filtered = [];
 
   @override
   void initState() {
     super.initState();
-    _searchController.addListener(_applyFilters);
+    _search.addListener(_applyFilters);
     _centerOnStartup();
     _loadBathrooms();
   }
 
-  Future<void> _centerOnStartup() async {
-    try {
-      // Intento “silencioso”: si está denegado, no muestra diálogos
-      var p = await Geolocator.checkPermission();
-      if (p == LocationPermission.denied) {
-        p = await Geolocator.requestPermission(); // intenta una vez
-      }
-
-      if (p == LocationPermission.whileInUse ||
-          p == LocationPermission.always) {
-        final pos = await Geolocator.getCurrentPosition(
-          locationSettings: _locSettings,
-        );
-        final here = LatLng(pos.latitude, pos.longitude);
-        setState(() => _myPos = here);
-
-        // Si estoy en Talca, centro en mi posición; si no, centro en Talca
-        if (_isInTalca(here)) {
-          _mapController.move(here, _kUserZoom);
-        } else {
-          _mapController.move(_kTalcaCenter, _kTalcaZoom);
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Fuera de Talca: centrado en Talca'),
-              ),
-            );
-          }
-        }
-        return;
-      }
-    } catch (_) {}
-    // En caso de error o permisos denegados, centro en Talca
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _mapController.move(_kTalcaCenter, _kTalcaZoom);
-    });
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Sin ubicación: centrado en Talca')),
-      );
-    }
-  }
-
-  Future<bool> _ensureLocationPermissionSmart({bool interactive = true}) async {
-    // 1) Servicio de ubicación (GPS) encendido
-    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) {
-      if (interactive && mounted) {
-        final go = await showDialog<bool>(
-          context: context,
-          builder: (_) => AlertDialog(
-            title: const Text('Ubicación desactivada'),
-            content: const Text(
-              'Activa el servicio de ubicación para centrar el mapa.',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('Cancelar'),
-              ),
-              TextButton(
-                onPressed: () => Navigator.pop(context, true),
-                child: const Text('Abrir ajustes'),
-              ),
-            ],
-          ),
-        );
-        if (go == true) {
-          await Geolocator.openLocationSettings();
-        }
-      } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Servicio de ubicación deshabilitado'),
-            ),
-          );
-        }
-      }
-      return false;
-    }
-
-    // 2) Permiso
-    var perm = await Geolocator.checkPermission();
-    if (perm == LocationPermission.denied) {
-      perm = await Geolocator.requestPermission();
-    }
-
-    // 3) Denegado para siempre → ofrecer ir a Configuración de la app
-    if (perm == LocationPermission.deniedForever) {
-      if (interactive && mounted) {
-        final go = await showDialog<bool>(
-          context: context,
-          builder: (_) => AlertDialog(
-            title: const Text('Permiso requerido'),
-            content: const Text(
-              'Para centrar el mapa en tu posición, concede el permiso de ubicación en la configuración de la app.',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('Cancelar'),
-              ),
-              TextButton(
-                onPressed: () => Navigator.pop(context, true),
-                child: const Text('Abrir configuración'),
-              ),
-            ],
-          ),
-        );
-        if (go == true) {
-          await Geolocator.openAppSettings();
-        }
-      } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Permiso de ubicación denegado permanentemente'),
-            ),
-          );
-        }
-      }
-      return false;
-    }
-
-    // 4) Concedido
-    return perm == LocationPermission.whileInUse ||
-        perm == LocationPermission.always;
-  }
-
-  Future<void> _loadBathrooms() async {
-    final OsmDataSource dataSource = OsmDataSource();
-    final BathroomRepositoryImpl repository = BathroomRepositoryImpl(
-      dataSource: dataSource,
-    );
-    final GetBathroomsUseCase getBathroomsUseCase = GetBathroomsUseCase(
-      repository: repository,
-    );
-
-    try {
-      final apibathrooms = await getBathroomsUseCase.call();
-      final fakebathrooms = _getMockBathrooms();
-      final bathrooms = [...apibathrooms, ...fakebathrooms];
-      setState(() {
-        _allBathrooms = bathrooms;
-        _filteredBathrooms = bathrooms;
-        _isLoading = false;
-      });
-    } catch (e) {
-      print(e);
-      setState(() {
-        _isLoading = false;
-      });
-    }
-  }
-
-  String _safeInitial(User u) {
-    String? s = u.displayName?.trim();
-    if (s == null || s.isEmpty) s = u.email?.trim();
-    if (s == null || s.isEmpty) return 'U';
-    // Si quieres soportar emojis/acentos mejor, usa package:characters.
-    return s.substring(0, 1).toUpperCase();
-  }
-
-  String _safeTitle(User u) {
-    final dn = u.displayName?.trim();
-    if (dn != null && dn.isNotEmpty) return dn;
-    final em = u.email?.trim();
-    if (em != null && em.isNotEmpty) return em;
-    return '(sin nombre)';
-  }
-
-  final _auth = FirebaseAuth.instance;
-
-  // controladores del form
-  final _emailCtrl = TextEditingController();
-  final _passCtrl = TextEditingController();
-  bool _authLoading = false;
-
-  Future<User?> _signInEmail(String email, String pass) async {
-    final cred = await _auth.signInWithEmailAndPassword(
-      email: email,
-      password: pass,
-    );
-    return cred.user;
-  }
-
-  Future<User?> _signUpEmail(String email, String pass) async {
-    final cred = await _auth.createUserWithEmailAndPassword(
-      email: email,
-      password: pass,
-    );
-    return cred.user;
-  }
-
-  Future<User?> _signInGoogle() async {
-    final googleUser = await GoogleSignIn().signIn();
-    if (googleUser == null) return null; // cancelado
-    final auth = await googleUser.authentication;
-    final credential = GoogleAuthProvider.credential(
-      idToken: auth.idToken,
-      accessToken: auth.accessToken,
-    );
-    final cred = await _auth.signInWithCredential(credential);
-    return cred.user;
-  }
-
-  Future<void> _signOut() async {
-    try {
-      await GoogleSignIn().signOut();
-    } catch (_) {}
-    await _auth.signOut();
-  }
-
-  Future<void> _openAuthSheet() async {
-    final user = _auth.currentUser;
-    if (user != null) {
-      // Ya logueado: mostrar perfil + salir
-      await showModalBottomSheet(
-        context: context,
-        isScrollControlled: true,
-        builder: (_) {
-          return SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      CircleAvatar(
-                        radius: 22,
-                        backgroundImage:
-                            (user.photoURL != null && user.photoURL!.isNotEmpty)
-                            ? NetworkImage(user.photoURL!)
-                            : null,
-                        child: (user.photoURL == null || user.photoURL!.isEmpty)
-                            ? Text(_safeInitial(user))
-                            : null,
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          _safeTitle(user),
-                          style: Theme.of(context).textTheme.titleMedium,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-
-                  const SizedBox(height: 16),
-                  FilledButton.icon(
-                    onPressed: () async {
-                      await _signOut();
-                      if (mounted) Navigator.pop(context);
-                      if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Sesión cerrada')),
-                        );
-                        setState(() {});
-                      }
-                    },
-                    icon: const Icon(Icons.logout),
-                    label: const Text('Cerrar sesión'),
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      );
-      return;
-    }
-
-    // No logueado: login / registro
-    bool isLogin = true;
-    _emailCtrl.text = '';
-    _passCtrl.text = '';
-
-    await showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      builder: (_) {
-        return SafeArea(
-          child: Padding(
-            padding: EdgeInsets.only(
-              left: 20,
-              right: 20,
-              top: 20,
-              bottom: 20 + MediaQuery.of(context).viewInsets.bottom,
-            ),
-            child: StatefulBuilder(
-              builder: (ctx, setModal) {
-                Future<void> doSubmit() async {
-                  setModal(() => _authLoading = true);
-                  try {
-                    User? u;
-                    final email = _emailCtrl.text.trim();
-                    final pass = _passCtrl.text.trim();
-                    if (isLogin) {
-                      u = await _signInEmail(email, pass);
-                    } else {
-                      u = await _signUpEmail(email, pass);
-                    }
-                    if (u != null && mounted) {
-                      Navigator.pop(context);
-                      _showSnack(isLogin ? 'Sesión iniciada' : 'Cuenta creada');
-                      setState(() {});
-                    }
-                  } on FirebaseAuthException catch (e) {
-                    setModal(() {
-                      err = _mapAuthError(e);
-                    });
-                  } finally {
-                    setModal(() => _authLoading = false);
-                  }
-                }
-
-                return SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Text(
-                            isLogin ? 'Iniciar sesión' : 'Crear cuenta',
-                            style: Theme.of(context).textTheme.titleMedium,
-                          ),
-                          const Spacer(),
-                          TextButton(
-                            onPressed: () {
-                              setModal(() {
-                                isLogin = !isLogin;
-                                err = '';
-                              });
-                            },
-                            child: Text(
-                              isLogin
-                                  ? '¿No tienes cuenta? Regístrate'
-                                  : '¿Ya tienes cuenta? Inicia sesión',
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-
-                      SizedBox(
-                        width: double.infinity,
-                        child: FilledButton.icon(
-                          onPressed: _authLoading
-                              ? null
-                              : () async {
-                                  setModal(() {
-                                    _authLoading = true;
-                                    err = '';
-                                  });
-                                  try {
-                                    final u = await _signInGoogle();
-                                    if (u != null && mounted) {
-                                      Navigator.pop(context);
-                                      _showSnack('Sesión iniciada con Google');
-                                      setState(() {});
-                                    }
-                                  } on FirebaseAuthException catch (e) {
-                                    _showSnack(_mapAuthError(e));
-                                  } catch (_) {
-                                    _showSnack(
-                                      'No se pudo iniciar sesión con Google.',
-                                    );
-                                  } finally {
-                                    setModal(() => _authLoading = false);
-                                  }
-                                },
-                          icon: _authLoading
-                              ? const SizedBox(
-                                  height: 16,
-                                  width: 16,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                  ),
-                                )
-                              : const Icon(Icons.g_mobiledata),
-                          label: const Text('Continuar con Google'),
-                        ),
-                      ),
-
-                      const SizedBox(height: 8),
-                      Row(
-                        children: const [
-                          Expanded(child: Divider()),
-                          Padding(
-                            padding: EdgeInsets.symmetric(horizontal: 8),
-                            child: Text('o con correo'),
-                          ),
-                          Expanded(child: Divider()),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-
-                      TextField(
-                        controller: _emailCtrl,
-                        keyboardType: TextInputType.emailAddress,
-                        decoration: const InputDecoration(
-                          labelText: 'Correo',
-                          border: OutlineInputBorder(),
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      TextField(
-                        controller: _passCtrl,
-                        obscureText: true,
-                        decoration: const InputDecoration(
-                          labelText: 'Contraseña',
-                          border: OutlineInputBorder(),
-                        ),
-                      ),
-
-                      if (err.isNotEmpty) ...[
-                        const SizedBox(height: 8),
-                        Text(err, style: const TextStyle(color: Colors.red)),
-                      ],
-
-                      const SizedBox(height: 12),
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          onPressed: _authLoading
-                              ? null
-                              : () {
-                                  err = '';
-                                  doSubmit();
-                                },
-                          icon: const Icon(Icons.email),
-                          label: Text(
-                            isLogin ? 'Entrar con correo' : 'Crear cuenta',
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
-          ),
-        );
-      },
-    );
-  }
-
   @override
   void dispose() {
-    _searchController.removeListener(_applyFilters);
-    _searchController.dispose();
-    _emailCtrl.dispose();
-    _passCtrl.dispose();
+    _search.removeListener(_applyFilters);
+    _search.dispose();
     super.dispose();
   }
 
-  void _applyFilters() {
-    List<Bathroom> tempFilteredList = _allBathrooms;
+  Future<void> _centerOnStartup() async {
+    try {
+      var p = await Geolocator.checkPermission();
+      if (p == LocationPermission.denied) {
+        p = await Geolocator.requestPermission();
+      }
+      if (p == LocationPermission.whileInUse ||
+          p == LocationPermission.always) {
+        final pos = await Geolocator.getCurrentPosition(
+          locationSettings: kLocSettings,
+        );
+        setState(() => _me = LatLng(pos.latitude, pos.longitude));
+      }
+    } catch (_) {}
+  }
 
-    // 1. Filtrar por Búsqueda (RF-02)
-    final String query = _searchController.text.toLowerCase();
-    if (query.isNotEmpty) {
-      tempFilteredList = tempFilteredList.where((bathroom) {
-        return bathroom.name.toLowerCase().contains(query);
-      }).toList();
-    }
-
-    // 2. Filtrar por Gratis (HU2 / RF-02)
-    if (_filterFree) {
-      tempFilteredList = tempFilteredList.where((bathroom) {
-        return bathroom.isFree;
-      }).toList();
-    }
-
-    // 3. Filtrar por Accesible (HU2 / RF-02)
-    if (_filterAccessible) {
-      tempFilteredList = tempFilteredList.where((bathroom) {
-        return bathroom.isAccessible;
-      }).toList();
-    }
-
-    // 4. Actualizar el estado para redibujar el mapa
+  Future<void> _loadBathrooms() async {
+    final repo = BathroomRepositoryImpl();
+    final mockModels = _mock()
+        .map(
+          (b) => BathroomModel(id: b.id, lat: b.lat, lon: b.lon, tags: b.tags),
+        )
+        .toList();
+    await repo.seedIfEmpty(mockModels);
+    final fbBathrooms = await repo.getAllFromFirestore();
     setState(() {
-      _filteredBathrooms = tempFilteredList;
+      _all = fbBathrooms;
+      _filtered = fbBathrooms;
+      _isLoading = false;
     });
   }
+
+  void _applyFilters() {
+    var list = _all;
+    final q = _search.text.toLowerCase();
+    if (q.isNotEmpty)
+      list = list.where((b) => b.name.toLowerCase().contains(q)).toList();
+    if (_free) list = list.where((b) => b.isFree).toList();
+    if (_accessible) list = list.where((b) => b.isAccessible).toList();
+    setState(() => _filtered = list);
+  }
+
+  List<Bathroom> _mock() => [
+    Bathroom(
+      id: 1001,
+      lat: -35.428,
+      lon: -71.655,
+      tags: {
+        'name': 'Baño Mall Plaza (Prueba)',
+        'fee': 'no',
+        'toilets:wheelchair': 'yes',
+      },
+    ),
+    Bathroom(
+      id: 1002,
+      lat: -35.425,
+      lon: -71.652,
+      tags: {
+        'name': 'Baño Municipal (Prueba)',
+        'fee': 'yes',
+        'toilets:wheelchair': 'no',
+      },
+    ),
+    Bathroom(
+      id: 1003,
+      lat: -35.426,
+      lon: -71.658,
+      tags: {
+        'name': 'Baños Café del Parque (Prueba)',
+        'fee': 'yes',
+        'toilets:wheelchair': 'yes',
+      },
+    ),
+    Bathroom(
+      id: 1004,
+      lat: -35.430,
+      lon: -71.650,
+      tags: {
+        'name': 'Baño Plaza de Armas (Prueba)',
+        'fee': 'no',
+        'toilets:wheelchair': 'limited',
+      },
+    ),
+  ];
 
   @override
   Widget build(BuildContext context) {
@@ -641,260 +144,174 @@ class _MapScreenState extends State<MapScreen> {
           IconButton(
             tooltip: (_auth.currentUser == null) ? 'Iniciar sesión' : 'Cuenta',
             icon: Icon(
-              _auth.currentUser == null ? Icons.login : Icons.verified_user,
+              (_auth.currentUser == null) ? Icons.login : Icons.verified_user,
             ),
-            onPressed: _openAuthSheet, // abre el popup de login/registro
+            onPressed: () => openAuthSheet(context, _auth),
           ),
         ],
       ),
-      body: _buildBody(),
-
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : _buildBody(),
       floatingActionButton: FloatingActionButton(
         heroTag: 'fab-location',
         tooltip: 'Mi ubicación',
         onPressed: () async {
-          final ok = await _ensureLocationPermissionSmart(interactive: true);
+          final ok = await ensureLocationPermissionSmart(
+            context,
+            interactive: true,
+          );
           if (!ok) return;
           final pos = await Geolocator.getCurrentPosition(
-            locationSettings: _locSettings,
+            locationSettings: kLocSettings,
           );
           if (!mounted) return;
-          setState(() => _myPos = LatLng(pos.latitude, pos.longitude));
-          _mapController.move(_myPos!, _kUserZoom);
+          setState(() => _me = LatLng(pos.latitude, pos.longitude));
+          _map.move(_me!, kUserZoom);
         },
         child: const Icon(Icons.my_location),
       ),
-      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
     );
   }
 
-  // Widget para el body
   Widget _buildBody() {
-    if (_isLoading) {
-      return LoadingIndicator();
-    }
+    final markers = _filtered
+        .map(
+          (b) => Marker(
+            width: 40,
+            height: 40,
+            point: LatLng(b.lat, b.lon),
+            child: IconButton(
+              icon: Icon(
+                Icons.wc,
+                size: 35,
+                color: b.isAccessible
+                    ? (b.isFree ? Colors.green : Colors.blue)
+                    : (b.isFree ? Colors.purple : Colors.red),
+              ),
+              onPressed: () => BathroomSheet.show(
+                context,
+                b,
+                me: _me,
+                onReview: _openReviewSheet,
+                onReport: _handleReportTap,
+                onDetails: _openBathroomDetail, // <-- agrega esto
+              ),
+            ),
+          ),
+        )
+        .toList();
 
     return Stack(
       children: [
-        // Capa 1: El Mapa (ocupa todo el espacio)
-        _buildMap(_filteredBathrooms),
-
-        // Capa 2: Los controles (búsqueda y filtros)
+        FlutterMap(
+          mapController: _map,
+          options: MapOptions(
+            initialCenter: kTalcaCenter,
+            initialZoom: kTalcaZoom,
+            onMapReady: () {
+              final tgt = (_me != null && isInTalca(_me!))
+                  ? _me!
+                  : kTalcaCenter;
+              final zm = (_me != null && isInTalca(_me!))
+                  ? kUserZoom
+                  : kTalcaZoom;
+              _map.move(tgt, zm);
+              if (_me != null && !isInTalca(_me!) && mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Fuera de Talca: centrado en Talca'),
+                  ),
+                );
+              }
+            },
+          ),
+          children: [
+            TileLayer(
+              urlTemplate:
+                  'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+              subdomains: ['a', 'b', 'c', 'd'],
+              userAgentPackageName: 'cl.banoapp.ejemplo',
+            ),
+            RichAttributionWidget(
+              alignment: AttributionAlignment.bottomRight,
+              attributions: const [
+                TextSourceAttribution('© OpenStreetMap contributors'),
+                TextSourceAttribution('© CARTO'),
+              ],
+            ),
+            if (_me != null)
+              CircleLayer(
+                circles: [
+                  CircleMarker(
+                    point: _me!,
+                    radius: 6,
+                    useRadiusInMeter: false,
+                    color: Colors.blue.withOpacity(0.8),
+                    borderStrokeWidth: 2,
+                    borderColor: Colors.white,
+                  ),
+                ],
+              ),
+            MarkerLayer(markers: markers),
+          ],
+        ),
         Positioned(
-          top: 10.0,
-          left: 10.0,
-          right: 10.0,
+          top: 10,
+          left: 10,
+          right: 10,
           child: Column(
             children: [
-              _buildSearchBar(), // Widget de búsqueda modificado
-              SizedBox(height: 8),
-              _buildFilterSwitches(), // Widget de filtros modificado
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildMap(List<Bathroom> bathrooms) {
-    final List<Marker> markers = bathrooms.map((bathroom) {
-      return Marker(
-        width: 40.0,
-        height: 40.0,
-        point: LatLng(bathroom.lat, bathroom.lon),
-
-        child: IconButton(
-          icon: Icon(
-            Icons.wc,
-            color: bathroom.isAccessible
-                ? (bathroom.isFree ? Colors.green : Colors.blue)
-                : (bathroom.isFree ? Colors.purple : Colors.red),
-            size: 35,
-          ),
-          onPressed: () {
-            // Criterio de Aceptación HU1: Tocar un pin abre ficha
-            _showBathroomDetails(context, bathroom);
-          },
-        ),
-      );
-    }).toList();
-
-    return FlutterMap(
-      mapController: _mapController,
-      options: const MapOptions(
-        initialCenter: _kTalcaCenter,
-        initialZoom: _kTalcaZoom,
-      ),
-      children: [
-        // Capa 1: El mapa base
-        TileLayer(
-          urlTemplate:
-              'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
-          subdomains: ['a', 'b', 'c', 'd'],
-          userAgentPackageName: 'cl.banoapp.ejemplo',
-        ),
-
-        _buildAttribution(),
-
-        if (_myPos != null)
-          CircleLayer(
-            circles: [
-              CircleMarker(
-                point: _myPos!,
-                radius: 6,
-                useRadiusInMeter: false,
-                color: Colors.blue.withOpacity(0.8),
-                borderStrokeWidth: 2,
-                borderColor: Colors.white,
+              MapSearchBar(controller: _search),
+              const SizedBox(height: 8),
+              MapFilterChips(
+                free: _free,
+                onFree: (v) {
+                  setState(() => _free = v);
+                  _applyFilters();
+                },
+                accessible: _accessible,
+                onAccessible: (v) {
+                  setState(() => _accessible = v);
+                  _applyFilters();
+                },
               ),
             ],
           ),
-
-        // Capa 2: Los marcadores de los baños
-        MarkerLayer(markers: markers),
-      ],
-    );
-  }
-
-  Widget _buildAttribution() {
-    return RichAttributionWidget(
-      alignment: AttributionAlignment.bottomRight,
-      attributions: [
-        TextSourceAttribution('© OpenStreetMap contributors'),
-        TextSourceAttribution('© CARTO'),
-      ],
-    );
-  }
-
-  // Muestra la ficha de detalle (HU1)
-  void _showBathroomDetails(BuildContext context, Bathroom bathroom) {
-    final distM = _distanceMetersTo(bathroom);
-    final distTxt = (distM == null) ? '–' : _fmtDist(distM);
-
-    showModalBottomSheet(
-      context: context,
-      builder: (bCtx) {
-        return SafeArea(
-          child: Container(
-            padding: const EdgeInsets.all(20),
-            width: double.infinity,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  bathroom.name,
-                  style: Theme.of(context).textTheme.headlineSmall,
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    const Icon(Icons.place, size: 18),
-                    const SizedBox(width: 6),
-                    Text('Distancia: $distTxt'),
-                    const SizedBox(width: 16),
-                    const Icon(Icons.star, size: 18),
-                    const SizedBox(width: 6),
-                    Text('Rating: 0.0'), // placeholder por ahora
-                  ],
-                ),
-                const SizedBox(height: 10),
-                Text('Gratis: ${bathroom.isFree ? "Sí" : "No"}'),
-                Text('Accesible: ${bathroom.isAccessible ? "Sí" : "No"}'),
-                const SizedBox(height: 12),
-
-                // Acciones HU1
-                Wrap(
-                  spacing: 8,
-                  children: [
-                    FilledButton.icon(
-                      onPressed: () {
-                        // TODO: Navegar a Detalle (pantalla futura)
-                        Navigator.pop(context);
-                      },
-                      icon: const Icon(Icons.info),
-                      label: const Text('Detalle'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () {
-                        // TODO: abrir modal de reseña (HUs futuras)
-                        Navigator.pop(context);
-                      },
-                      icon: const Icon(Icons.rate_review),
-                      label: const Text('Reseñar'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () {
-                        Navigator.pop(context);
-                      },
-                      icon: const Icon(Icons.report),
-                      label: const Text('Reportar'),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  // Widget para la barra de búsqueda
-  Widget _buildSearchBar() {
-    return Card(
-      color: Colors.white.withOpacity(0.9),
-      elevation: 4.0,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12.0)),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8.0),
-        child: TextField(
-          controller: _searchController,
-          decoration: InputDecoration(
-            hintText: 'Buscar por nombre...',
-            prefixIcon: Icon(Icons.search),
-
-            border: InputBorder.none,
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildFilterSwitches() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-      children: [
-        // Filtro "Gratis"
-        FilterChip(
-          label: Text('Gratis'),
-          selected: _filterFree,
-          onSelected: (bool value) {
-            setState(() {
-              _filterFree = value;
-            });
-            _applyFilters();
-          },
-          // Fondo semi-transparente
-          backgroundColor: Colors.white.withOpacity(0.9),
-          selectedColor: Colors.blue.withOpacity(0.8),
-        ),
-
-        // Filtro "Accesible"
-        FilterChip(
-          label: Text('Accesible'),
-          selected: _filterAccessible,
-          onSelected: (bool value) {
-            setState(() {
-              _filterAccessible = value;
-            });
-            _applyFilters();
-          },
-          // Fondo semi-transparente
-          backgroundColor: Colors.white.withOpacity(0.9),
-          selectedColor: Colors.blue.withOpacity(0.8),
         ),
       ],
+    );
+  }
+
+  Future<void> _openReviewSheet(String id, String name) async {
+    await openReviewSheet(
+      context,
+      auth: _auth,
+      bathroomId: id,
+      bathroomName: name,
+      onSaved: _loadBathrooms, // refresca lista tras publicar
+    );
+  }
+
+  Future<void> _openBathroomDetail(String id, String name) async {
+    await openBathroomDetailSheet(
+      context,
+      auth: _auth,
+      bathroomId: id,
+      bathroomName: name,
+      onReviewSaved: _loadBathrooms,
+    );
+  }
+
+  Future<void> _handleReportTap(String id, String name) async {
+    if (_auth.currentUser == null) {
+      await openAuthSheet(context, _auth);
+      if (_auth.currentUser == null) return;
+    }
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Función "Reportar" próximamente')),
     );
   }
 }
