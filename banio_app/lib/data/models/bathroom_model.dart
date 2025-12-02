@@ -23,7 +23,21 @@ class BathroomModel extends Bathroom {
       id: json['id'],
       lat: lat,
       lon: lon,
-      tags: json['tags'] ?? {}, // Aseguramos que 'tags' nunca sea nulo
+      tags: json['tags'] ?? {},
     );
   }
+
+  Map<String, dynamic> toMap() => {
+    'id': id,
+    'lat': lat,
+    'lon': lon,
+    'name': tags['name'] ?? '',
+    'fee': tags['fee'] ?? '',
+    'wheelchair': tags['toilets:wheelchair'] ?? '',
+    'tags': tags,
+    'ratingAvg': 0.0,
+    'ratingCount': 0,
+    'source': 'osm_or_mock',
+    'updatedAt': DateTime.now(),
+  };
 }

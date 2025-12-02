@@ -6,6 +6,9 @@ import 'package:geolocator/geolocator.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 
+import '../../data/models/bathroom_model.dart';
+import '../../data/models/review_model.dart';
+import '../../data/repositories/review_repository_impl.dart';
 import '../../domain/entities/bathroom.dart';
 import '../../domain/use_cases/get_bathrooms_usecase.dart';
 import '../widgets/loading_indicator.dart';
@@ -271,29 +274,23 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   Future<void> _loadBathrooms() async {
-    final OsmDataSource dataSource = OsmDataSource();
-    final BathroomRepositoryImpl repository = BathroomRepositoryImpl(
-      dataSource: dataSource,
-    );
-    final GetBathroomsUseCase getBathroomsUseCase = GetBathroomsUseCase(
-      repository: repository,
-    );
+    final repo = BathroomRepositoryImpl();
+    // 1) Si Firestore está vacío, siembra los mocks actuales
+    final mockModels = _getMockBathrooms()
+        .map(
+          (b) => BathroomModel(id: b.id, lat: b.lat, lon: b.lon, tags: b.tags),
+        )
+        .toList();
+    await repo.seedIfEmpty(mockModels);
 
-    try {
-      final apibathrooms = await getBathroomsUseCase.call();
-      final fakebathrooms = _getMockBathrooms();
-      final bathrooms = [...apibathrooms, ...fakebathrooms];
-      setState(() {
-        _allBathrooms = bathrooms;
-        _filteredBathrooms = bathrooms;
-        _isLoading = false;
-      });
-    } catch (e) {
-      print(e);
-      setState(() {
-        _isLoading = false;
-      });
-    }
+    // 2) Lee desde Firestore (fuente oficial)
+    final fbBathrooms = await repo.getAllFromFirestore();
+
+    setState(() {
+      _allBathrooms = fbBathrooms;
+      _filteredBathrooms = fbBathrooms;
+      _isLoading = false;
+    });
   }
 
   String _safeInitial(User u) {
@@ -592,6 +589,118 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
+  Future<void> _openReviewSheet(String bathroomId, String bathroomName) async {
+    // 1) Gate de autenticación
+    if (_auth.currentUser == null) {
+      await _openAuthSheet(); // tu popup actual
+      if (_auth.currentUser == null) return;
+    }
+
+    int rating = 5;
+    final ctrl = TextEditingController();
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => SafeArea(
+        child: Padding(
+          padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
+            top: 20,
+            bottom: 20 + MediaQuery.of(context).viewInsets.bottom,
+          ),
+          child: StatefulBuilder(
+            builder: (ctx, setModal) {
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Reseñar: $bathroomName',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      const Text('Puntaje:'),
+                      const SizedBox(width: 8),
+                      DropdownButton<int>(
+                        value: rating,
+                        items: [1, 2, 3, 4, 5]
+                            .map(
+                              (e) => DropdownMenuItem(
+                                value: e,
+                                child: Text('$e ★'),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (v) => setModal(() => rating = v ?? 5),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: ctrl,
+                    maxLines: 3,
+                    decoration: const InputDecoration(
+                      labelText: 'Comentario (opcional)',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      icon: const Icon(Icons.send),
+                      label: const Text('Publicar reseña'),
+                      onPressed: () async {
+                        final user = _auth.currentUser!;
+                        final review = ReviewModel(
+                          id: '', // Firestore lo asigna
+                          userId: user.uid,
+                          userName: user.displayName ?? user.email ?? 'usuario',
+                          rating: rating,
+                          comment: ctrl.text.trim(),
+                          createdAt: DateTime.now(),
+                        );
+
+                        final revRepo = ReviewRepositoryImpl();
+                        await revRepo.addReview(
+                          bathroomId: bathroomId,
+                          review: review,
+                        );
+
+                        // Recalcular agregados y actualizar baño
+                        final (avg, count) = await revRepo.recomputeAggregates(
+                          bathroomId,
+                        );
+                        await BathroomRepositoryImpl().updateAggregate(
+                          bathroomId: bathroomId,
+                          ratingAvg: double.parse(avg.toStringAsFixed(2)),
+                          ratingCount: count,
+                        );
+
+                        if (mounted) {
+                          Navigator.pop(context);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('¡Reseña publicada!')),
+                          );
+                          // opcional: refrescar listado
+                          _loadBathrooms();
+                        }
+                      },
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   void dispose() {
     _searchController.removeListener(_applyFilters);
@@ -819,6 +928,8 @@ class _MapScreenState extends State<MapScreen> {
                       onPressed: () {
                         // TODO: abrir modal de reseña (HUs futuras)
                         Navigator.pop(context);
+                        final id = bathroom.id.toString();
+                        _openReviewSheet(id, bathroom.name);
                       },
                       icon: const Icon(Icons.rate_review),
                       label: const Text('Reseñar'),

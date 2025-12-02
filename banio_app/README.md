@@ -7,78 +7,74 @@ Proyecto de mapeo colaborativo para encontrar y calificar baños públicos en la
 
 Este proyecto es parte del curso de Desarrollo de Software (Prof. Sebastián Ortega).
 
-##  Características (Hito 1 / Entregable 25%)
+---
 
-El estado actual del proyecto (Entregable 1) incluye las siguientes funcionalidades:
+## ✅ Estado del Proyecto (Hito 1 – Entregable 25%)
 
-* **Mapa Interactivo:** Visualización de la ciudad de Talca usando `flutter_map` con un mapa base limpio de CARTO.
-* **Datos de Origen (OSM):** Carga inicial de baños existentes desde la API Overpass (basada en OpenStreetMap).
-* **Búsqueda y Filtros (HU1, HU2):** Una barra de búsqueda y filtros flotante (UI en `Stack`) que permite filtrar los marcadores del mapa en tiempo real por:
-    * Nombre (Búsqueda textual).
-    * Gratis (`fee=no`).
-    * Accesible (`toilets:wheelchair=yes`).
-* **Datos de Prueba (Mocks):** Inyección de datos de prueba para demostrar el funcionamiento de los filtros y la búsqueda.
+### Funcionalidades clave por Historia de Usuario
+
+**HU1 – Ver mapa y centrado en mi ubicación**
+- Mapa interactivo con `flutter_map` (CARTO light).
+- Centrado **automático** al abrir:
+  - Si hay permisos y GPS activos → centra en mi ubicación (zoom 16).
+  - Si no → **fallback** a centro de Talca (−35.427, −71.655; zoom 15) con SnackBar informativo.
+- Botón **“Mi ubicación”** (FAB) que reintenta permisos y centra el mapa.
+- Manejo robusto de permisos:
+  - `denied` → solicita permiso.
+  - `deniedForever` → diálogo para abrir **Configuración** de la app.
+  - GPS apagado → diálogo para abrir **Ajustes de ubicación**.
+
+**HU2 – Buscar y filtrar resultados**
+- Barra de búsqueda por nombre (filtrado en tiempo real).
+- Filtros combinables:
+  - **Gratis** (`fee=no`)
+  - **Accesible** (`toilets:wheelchair=yes`)
+
+**HU3 – Ver distancia y acciones sobre un baño**
+- Al tocar un pin se abre ficha con:
+  - **Distancia** desde mi posición (m / km).
+  - Indicadores **Gratis** / **Accesible**.
+  - Botones: **Detalle**, **Reseñar**, **Reportar** (placeholders).
+- Capa visual para **mi posición** (círculo azul).
+
+**HU4 – Autenticación (email/Google)**
+- Botón **Cuenta** en la esquina superior derecha (AppBar).
+- Popup (bottom sheet) para:
+  - **Google Sign-In** (botón principal).
+  - **Email/Password** (login/registro).
+  - Mostrar **errores** (p. ej., “Correo o contraseña incorrectos.”, “Ese correo ya está registrado.”).
+  - Ver **perfil básico** y **cerrar sesión** cuando hay sesión activa.
+- **Gate de autenticación**: si el usuario toca **Reseñar** o **Reportar** sin sesión, se abre el popup de login/registro; tras autenticarse, se continúa.
+
+> Además, se inyectan **datos de prueba (mocks)** para que búsqueda/filtros/fichas sean demostrables incluso si la API de Overpass no retorna datos.
 
 ---
 
-## 🏗️ Arquitectura del Proyecto
+## 🏗️ Arquitectura (inspirada en Clean Architecture)
 
-El proyecto sigue una estructura inspirada en **Arquitectura Limpia (Clean Architecture)** para cumplir con los requisitos de mantenibilidad (RNF-03) y separar las responsabilidades en tres capas principales:
+- `lib/presentation/` → Pantallas y widgets (UI y lógica de estado ligera).
+  - `screens/map_screen.dart` (mapa, permisos, auth popup, fichas)
+- `lib/domain/` → Entidades y casos de uso.
+  - `entities/bathroom.dart`
+  - `use_cases/get_bathrooms_usecase.dart`
+- `lib/data/` → Repositorios y fuentes de datos.
+  - `data_sources/osm_data_source.dart` (Overpass/OSM)
+  - `repositories/bathroom_repository_impl.dart`
 
-
-
-* `lib/presentation`: Contiene la UI (Widgets, Pantallas) y la lógica de estado.
-* `lib/domain`: Contiene la lógica de negocio pura (Entidades, Casos de Uso) y las definiciones de los repositorios.
-* `lib/data`: Contiene la implementación de los repositorios y las fuentes de datos (ej. `OsmDataSource` para la API Overpass).
-
----
-
-## 📦 Dependencias Principales
-
-El archivo `pubspec.yaml` define todas las dependencias. Las más importantes para este hito son:
-
-* `flutter_map`: El widget principal para mostrar el mapa (alternativa a Google Maps).
-* `http`: Para realizar las peticiones HTTP a la API de Overpass.
-* `latlong2`: Paquete de utilidades para `flutter_map` (manejo de LatLng).
+> Próximo paso (Hito siguiente): mover **Auth/User** a repositorios/UC (actualmente la UI orquesta FirebaseAuth directamente para simplificar la demo de HU4).
 
 ---
 
-## 🚀 Guía de Ejecución
+## 🧩 Dependencias principales
 
-Sigue estos pasos para clonar y ejecutar el proyecto en un entorno Ubuntu/Linux con VS Code.
-
-### Requisitos Previos
-
-* [SDK de Flutter](https://flutter.dev/docs/get-started/install/linux)
-* [Git](https://git-scm.com/downloads)
-* [Visual Studio Code](https://code.visualstudio.com/) (con la extensión de Flutter)
-
-### Pasos
-
-1.  **Clonar el repositorio:**
-    ```bash
-    git clone git@github.com:RenataArcos/talca-banios.git
-    cd talca-banios
-    ```
-
-2.  **Abrir en VS Code:**
-    
-
-3.  **Obtener dependencias:**
-    Abre una terminal dentro de VS Code y ejecuta:
-    ```bash
-    flutter pub get
-    ```
-
-4.  **Ejecutar la aplicación:**
-    *  Ejecuta:
-    ```bash
-    flutter run
-    ```
-
----
-
-
-## 📝 Licencia
-
-Este proyecto está bajo la Licencia MIT.
+```yaml
+# pubspec.yaml (extracto)
+dependencies:
+  flutter_map: ^7.x
+  latlong2: ^0.9.x
+  http: ^1.x
+  geolocator: ^13.x
+  firebase_core: ^3.x
+  firebase_auth: ^5.x
+  google_sign_in: ^6.x
+  cloud_firestore: ^5.x   # (cuando habilites Firestore)
