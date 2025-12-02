@@ -17,6 +17,7 @@ import '../../data/repositories/bathroom_repository_impl.dart';
 import '../../domain/entities/bathroom.dart';
 import '../widgets/review_sheet.dart';
 import '../widgets/bathroom_detail_sheet.dart';
+import '../widgets/propose_bathroom_sheet.dart';
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -154,23 +155,47 @@ class _MapScreenState extends State<MapScreen> {
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _buildBody(),
-      floatingActionButton: FloatingActionButton(
-        heroTag: 'fab-location',
-        tooltip: 'Mi ubicación',
-        onPressed: () async {
-          final ok = await ensureLocationPermissionSmart(
-            context,
-            interactive: true,
-          );
-          if (!ok) return;
-          final pos = await Geolocator.getCurrentPosition(
-            locationSettings: kLocSettings,
-          );
-          if (!mounted) return;
-          setState(() => _me = LatLng(pos.latitude, pos.longitude));
-          _map.move(_me!, kUserZoom);
-        },
-        child: const Icon(Icons.my_location),
+      floatingActionButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          // FAB: Proponer baño
+          FloatingActionButton.extended(
+            heroTag: 'fab-propose',
+            icon: const Icon(Icons.add_location_alt),
+            label: const Text('Proponer'),
+            onPressed: () => openProposeBathroomSheet(
+              context,
+              auth: _auth, // o tu AuthService actual
+              me: _me, // si ya tienes la ubicación
+              onSubmitted: () {
+                // opcional: si en el futuro las propuestas aprobadas
+                // pasan a la colección bathrooms, aquí refrescas.
+                // _loadBathrooms();
+              },
+            ),
+          ),
+          const SizedBox(height: 10),
+          // FAB: Mi ubicación (tu existente)
+          FloatingActionButton(
+            heroTag: 'fab-location',
+            tooltip: 'Mi ubicación',
+            onPressed: () async {
+              final ok = await ensureLocationPermissionSmart(
+                context,
+                interactive: true,
+              );
+              if (!ok) return;
+              final pos = await Geolocator.getCurrentPosition(
+                locationSettings: kLocSettings,
+              );
+              if (!mounted) return;
+              setState(() => _me = LatLng(pos.latitude, pos.longitude));
+              _map.move(_me!, kUserZoom);
+            },
+            child: const Icon(Icons.my_location),
+          ),
+        ],
       ),
     );
   }
