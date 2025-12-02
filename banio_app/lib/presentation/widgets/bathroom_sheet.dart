@@ -2,7 +2,9 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:latlong2/latlong.dart';
+import '../../core/utils/auth_service.dart';
 import '../../domain/entities/bathroom.dart';
+import 'report_sheet.dart';
 
 typedef OnReviewTap =
     Future<void> Function(String bathroomId, String bathroomName);
@@ -122,9 +124,16 @@ class BathroomSheet {
                   ),
                   OutlinedButton.icon(
                     onPressed: () {
-                      Navigator.of(context).pop();
+                      Navigator.of(context).pop(); // cierra ficha
                       scheduleMicrotask(
-                        () => onReport(b.id.toString(), b.name),
+                        () => openReportSheet(
+                          context,
+                          auth:
+                              AuthService(), // o pásalo desde MapScreen si ya lo tienes
+                          target: ReportTarget.bathroom,
+                          bathroomId: b.id.toString(),
+                          title: 'Reportar: ${b.name}',
+                        ),
                       );
                     },
                     icon: const Icon(Icons.report),

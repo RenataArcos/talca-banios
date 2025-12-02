@@ -5,6 +5,7 @@ import '../../core/utils/auth_service.dart';
 import '../../data/models/review_model.dart';
 import '../../data/repositories/review_repository_impl.dart';
 import 'review_sheet.dart';
+import 'report_sheet.dart';
 
 Future<void> openBathroomDetailSheet(
   BuildContext hostContext, {
@@ -50,7 +51,7 @@ class _BathroomDetailContent extends StatefulWidget {
 
 class _BathroomDetailContentState extends State<_BathroomDetailContent> {
   late final ReviewRepositoryImpl _repo;
-  Future<List<ReviewModel>>? _future; // cache
+  Future<List<ReviewModel>>? _future;
 
   @override
   void initState() {
@@ -96,7 +97,6 @@ class _BathroomDetailContentState extends State<_BathroomDetailContent> {
               onRefresh: _refresh,
               child: ListView(
                 children: [
-                  // Header
                   Row(
                     children: [
                       Expanded(
@@ -119,7 +119,6 @@ class _BathroomDetailContentState extends State<_BathroomDetailContent> {
                   ),
                   const SizedBox(height: 12),
 
-                  // Botón reseñar
                   SizedBox(
                     width: double.infinity,
                     child: OutlinedButton.icon(
@@ -156,7 +155,12 @@ class _BathroomDetailContentState extends State<_BathroomDetailContent> {
                       final r = reviews[i];
                       return Column(
                         children: [
-                          _ReviewTile(model: r),
+                          _ReviewTile(
+                            model: r,
+                            hostContext: widget.hostContext,
+                            auth: widget.auth,
+                            bathroomId: widget.bathroomId,
+                          ),
                           if (i != reviews.length - 1)
                             const Divider(height: 12),
                         ],
@@ -193,7 +197,16 @@ class _Stars extends StatelessWidget {
 
 class _ReviewTile extends StatelessWidget {
   final ReviewModel model;
-  const _ReviewTile({required this.model});
+  final BuildContext hostContext;
+  final AuthService auth;
+  final String bathroomId;
+
+  const _ReviewTile({
+    required this.model,
+    required this.hostContext,
+    required this.auth,
+    required this.bathroomId,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -226,6 +239,28 @@ class _ReviewTile extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             Text(dateTxt, style: Theme.of(context).textTheme.bodySmall),
+
+            IconButton(
+              tooltip: 'Reportar reseña',
+              icon: const Icon(Icons.flag, size: 18),
+              onPressed: () {
+                if (Navigator.of(context).canPop()) {
+                  Navigator.of(context).pop();
+                }
+                scheduleMicrotask(() {
+                  openReportSheet(
+                    hostContext,
+                    auth: auth,
+                    target: ReportTarget.review,
+                    bathroomId: bathroomId,
+                    reviewId: model.id,
+                    title:
+                        'Reportar reseña de '
+                        '${(model.userName.isEmpty) ? "Usuario" : model.userName}',
+                  );
+                });
+              },
+            ),
           ],
         ),
         if (model.comment.isNotEmpty) ...[

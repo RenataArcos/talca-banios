@@ -7,6 +7,7 @@ import 'package:latlong2/latlong.dart';
 import '../../core/utils/auth_service.dart';
 import '../../core/utils/locations_utils.dart';
 import '../widgets/auth_sheet.dart';
+import '../widgets/report_sheet.dart';
 import '../widgets/search_bar.dart';
 import '../widgets/filter_chips.dart';
 import '../widgets/bathroom_sheet.dart';
@@ -309,9 +310,12 @@ class _MapScreenState extends State<MapScreen> {
       if (_auth.currentUser == null) return;
     }
 
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Función "Reportar" próximamente')),
+    await openReportSheet(
+      context,
+      auth: _auth, // tu AuthService
+      target: ReportTarget.bathroom,
+      bathroomId: id,
+      title: 'Reportar: $name',
     );
   }
 }
