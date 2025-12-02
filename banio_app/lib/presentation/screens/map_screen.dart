@@ -15,6 +15,7 @@ import '../../data/models/bathroom_model.dart';
 import '../../data/repositories/bathroom_repository_impl.dart';
 import '../../domain/entities/bathroom.dart';
 import '../widgets/review_sheet.dart';
+import '../widgets/bathroom_detail_sheet.dart';
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -194,6 +195,7 @@ class _MapScreenState extends State<MapScreen> {
                 me: _me,
                 onReview: _openReviewSheet,
                 onReport: _handleReportTap,
+                onDetails: _openBathroomDetail, // <-- agrega esto
               ),
             ),
           ),
@@ -291,13 +293,22 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
+  Future<void> _openBathroomDetail(String id, String name) async {
+    await openBathroomDetailSheet(
+      context,
+      auth: _auth,
+      bathroomId: id,
+      bathroomName: name,
+      onReviewSaved: _loadBathrooms,
+    );
+  }
+
   Future<void> _handleReportTap(String id, String name) async {
-    // Gate de autenticación: si no hay sesión, abrir popup
     if (_auth.currentUser == null) {
       await openAuthSheet(context, _auth);
       if (_auth.currentUser == null) return;
     }
-    // Placeholder de "reportar" (aquí más adelante podrás abrir su sheet)
+
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Función "Reportar" próximamente')),

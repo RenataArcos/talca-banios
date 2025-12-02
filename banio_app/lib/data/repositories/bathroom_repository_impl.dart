@@ -9,16 +9,32 @@ class BathroomRepositoryImpl {
     final qs = await _col.get();
     return qs.docs.map((d) {
       final m = d.data();
+
+      // Parte clave: construir tags base e INYECTAR agregados si existen
+      final tags = Map<String, dynamic>.from(m['tags'] ?? {})
+        ..addAll({
+          'name': m['name'] ?? '',
+          'fee': m['fee'] ?? '',
+          'toilets:wheelchair': m['wheelchair'] ?? '',
+        });
+
+      // <- Agregados para que el UI los lea desde tags
+      if (m['ratingAvg'] != null) {
+        final ra = m['ratingAvg'];
+        tags['ratingAvg'] = (ra is num)
+            ? ra.toDouble()
+            : double.tryParse('$ra');
+      }
+      if (m['ratingCount'] != null) {
+        final rc = m['ratingCount'];
+        tags['ratingCount'] = (rc is num) ? rc.toInt() : int.tryParse('$rc');
+      }
+
       return Bathroom(
         id: int.tryParse(d.id) ?? (m['id'] ?? 0),
         lat: (m['lat'] ?? 0.0).toDouble(),
         lon: (m['lon'] ?? 0.0).toDouble(),
-        tags: Map<String, dynamic>.from(m['tags'] ?? {})
-          ..addAll({
-            'name': m['name'] ?? '',
-            'fee': m['fee'] ?? '',
-            'toilets:wheelchair': m['wheelchair'] ?? '',
-          }),
+        tags: tags,
       );
     }).toList();
   }
