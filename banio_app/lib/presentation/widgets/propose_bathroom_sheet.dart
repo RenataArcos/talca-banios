@@ -9,9 +9,9 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../core/utils/auth_service.dart';
-import '../../core/utils/locations_utils.dart'; // ensureLocationPermissionSmart, kLocSettings
-import 'auth_sheet.dart'; // por si no hay sesión
-import 'location_picker_sheet.dart'; // NUEVO
+import '../../core/utils/locations_utils.dart';
+import 'auth_sheet.dart';
+import 'location_picker_sheet.dart';
 
 Future<void> openProposeBathroomSheet(
   BuildContext hostContext, {
@@ -60,8 +60,8 @@ class _ProposeBathroomFormState extends State<_ProposeBathroomForm> {
   final _name = TextEditingController();
   final _desc = TextEditingController();
 
-  String _fee = 'unknown'; // yes | no | unknown
-  String _wheelchair = 'unknown'; // yes | no | limited | unknown
+  String _fee = 'unknown';
+  String _wheelchair = 'unknown';
 
   double? _lat, _lon;
   bool _saving = false;

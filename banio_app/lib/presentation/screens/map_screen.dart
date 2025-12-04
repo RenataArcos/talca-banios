@@ -9,21 +9,20 @@ import '../../core/utils/auth_service.dart';
 import '../../core/utils/locations_utils.dart';
 import '../widgets/auth_sheet.dart';
 import '../widgets/report_sheet.dart';
-import '../widgets/search_bar.dart';
+//import '../widgets/search_bar.dart';
 import '../widgets/bathroom_sheet.dart';
 import '../widgets/bathroom_detail_sheet.dart';
 import '../widgets/propose_bathroom_sheet.dart';
-import '../widgets/filter_sheet.dart'; // <— bottom sheet de filtros
+import '../widgets/filter_sheet.dart';
 
 import '../../data/models/bathroom_model.dart';
 import '../../data/repositories/bathroom_repository_impl.dart';
 import '../../domain/entities/bathroom.dart';
 import '../widgets/review_sheet.dart';
 
-/// Colores de la barra inferior
-const kPurple = Color(0xFF6F5DE7); // morado principal
-const kPurpleSoft = Color(0xFFEDE7FF); // morado pastel de fondo
-const kPurpleText = Color(0xFF4C3BCF); // morado para íconos/texto
+const kPurple = Color(0xFF6F5DE7);
+const kPurpleSoft = Color(0xFFEDE7FF);
+const kPurpleText = Color(0xFF4C3BCF);
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -34,7 +33,6 @@ class MapScreen extends StatefulWidget {
 class _MapScreenState extends State<MapScreen> {
   final _auth = AuthService();
 
-  // estado
   bool _isLoading = true;
   final TextEditingController _search = TextEditingController();
   bool _free = false, _accessible = false;
@@ -76,12 +74,6 @@ class _MapScreenState extends State<MapScreen> {
 
   Future<void> _loadBathrooms() async {
     final repo = BathroomRepositoryImpl();
-    final mockModels = _mock()
-        .map(
-          (b) => BathroomModel(id: b.id, lat: b.lat, lon: b.lon, tags: b.tags),
-        )
-        .toList();
-    await repo.seedIfEmpty(mockModels);
     final fbBathrooms = await repo.getAllFromFirestore();
     setState(() {
       _all = fbBathrooms;
@@ -100,49 +92,6 @@ class _MapScreenState extends State<MapScreen> {
     if (_accessible) list = list.where((b) => b.isAccessible).toList();
     setState(() => _filtered = list);
   }
-
-  List<Bathroom> _mock() => [
-    Bathroom(
-      id: 1001,
-      lat: -35.428,
-      lon: -71.655,
-      tags: {
-        'name': 'Baño Mall Plaza (Prueba)',
-        'fee': 'no',
-        'toilets:wheelchair': 'yes',
-      },
-    ),
-    Bathroom(
-      id: 1002,
-      lat: -35.425,
-      lon: -71.652,
-      tags: {
-        'name': 'Baño Municipal (Prueba)',
-        'fee': 'yes',
-        'toilets:wheelchair': 'no',
-      },
-    ),
-    Bathroom(
-      id: 1003,
-      lat: -35.426,
-      lon: -71.658,
-      tags: {
-        'name': 'Baños Café del Parque (Prueba)',
-        'fee': 'yes',
-        'toilets:wheelchair': 'yes',
-      },
-    ),
-    Bathroom(
-      id: 1004,
-      lat: -35.430,
-      lon: -71.650,
-      tags: {
-        'name': 'Baño Plaza de Armas (Prueba)',
-        'fee': 'no',
-        'toilets:wheelchair': 'limited',
-      },
-    ),
-  ];
 
   @override
   Widget build(BuildContext context) {
@@ -163,14 +112,12 @@ class _MapScreenState extends State<MapScreen> {
           ? const Center(child: CircularProgressIndicator())
           : _buildBody(),
 
-      // ——— BARRA INFERIOR ———
       bottomNavigationBar: SafeArea(
         top: false,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
           child: Row(
             children: [
-              // IZQUIERDA: Sugerir baño (pastel con texto)
               Expanded(
                 child: _PillButton(
                   icon: Icons.add_location_alt,
@@ -186,7 +133,6 @@ class _MapScreenState extends State<MapScreen> {
 
               const SizedBox(width: 12),
 
-              // CENTRO: Mi ubicación (circular, sin texto)
               _CircleAction(
                 icon: Icons.my_location,
                 onTap: () async {
@@ -206,7 +152,6 @@ class _MapScreenState extends State<MapScreen> {
 
               const SizedBox(width: 12),
 
-              // DERECHA: Filtros (pastel con texto)
               Expanded(
                 child: _PillButton(
                   icon: Icons.filter_list,
@@ -247,7 +192,7 @@ class _MapScreenState extends State<MapScreen> {
               icon: Icon(
                 Icons.wc,
                 size: 35,
-                // Colores temporales (hasta que integremos opening_hours)
+
                 color: b.isAccessible
                     ? (b.isFree ? Colors.green : Colors.blue)
                     : (b.isFree ? Colors.purple : Colors.red),
@@ -319,13 +264,6 @@ class _MapScreenState extends State<MapScreen> {
             MarkerLayer(markers: markers),
           ],
         ),
-        // Barra de búsqueda arriba
-        Positioned(
-          top: 10,
-          left: 10,
-          right: 10,
-          child: MapSearchBar(controller: _search),
-        ),
       ],
     );
   }
@@ -365,7 +303,6 @@ class _MapScreenState extends State<MapScreen> {
   }
 }
 
-/// Botón “pastilla” (fondo pastel, con icono + texto)
 class _PillButton extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -412,7 +349,6 @@ class _PillButton extends StatelessWidget {
   }
 }
 
-/// Botón circular central (sin texto, icono centrado, morado)
 class _CircleAction extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
@@ -428,7 +364,6 @@ class _CircleAction extends StatelessWidget {
       child: Stack(
         alignment: Alignment.center,
         children: [
-          // “silueta” pastel detrás
           Positioned.fill(
             child: Container(
               decoration: BoxDecoration(
@@ -437,7 +372,6 @@ class _CircleAction extends StatelessWidget {
               ),
             ),
           ),
-          // botón circular
           Material(
             color: kPurple,
             shape: const CircleBorder(),
