@@ -1,3 +1,4 @@
+// lib/presentation/screens/map_screen.dart
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -9,15 +10,20 @@ import '../../core/utils/locations_utils.dart';
 import '../widgets/auth_sheet.dart';
 import '../widgets/report_sheet.dart';
 import '../widgets/search_bar.dart';
-import '../widgets/filter_chips.dart';
 import '../widgets/bathroom_sheet.dart';
+import '../widgets/bathroom_detail_sheet.dart';
+import '../widgets/propose_bathroom_sheet.dart';
+import '../widgets/filter_sheet.dart'; // <— bottom sheet de filtros
 
 import '../../data/models/bathroom_model.dart';
 import '../../data/repositories/bathroom_repository_impl.dart';
 import '../../domain/entities/bathroom.dart';
 import '../widgets/review_sheet.dart';
-import '../widgets/bathroom_detail_sheet.dart';
-import '../widgets/propose_bathroom_sheet.dart';
+
+/// Colores de la barra inferior
+const kPurple = Color(0xFF6F5DE7); // morado principal
+const kPurpleSoft = Color(0xFFEDE7FF); // morado pastel de fondo
+const kPurpleText = Color(0xFF4C3BCF); // morado para íconos/texto
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -87,8 +93,9 @@ class _MapScreenState extends State<MapScreen> {
   void _applyFilters() {
     var list = _all;
     final q = _search.text.toLowerCase();
-    if (q.isNotEmpty)
+    if (q.isNotEmpty) {
       list = list.where((b) => b.name.toLowerCase().contains(q)).toList();
+    }
     if (_free) list = list.where((b) => b.isFree).toList();
     if (_accessible) list = list.where((b) => b.isAccessible).toList();
     setState(() => _filtered = list);
@@ -155,47 +162,76 @@ class _MapScreenState extends State<MapScreen> {
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _buildBody(),
-      floatingActionButton: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          // FAB: Proponer baño
-          FloatingActionButton.extended(
-            heroTag: 'fab-propose',
-            icon: const Icon(Icons.add_location_alt),
-            label: const Text('Proponer'),
-            onPressed: () => openProposeBathroomSheet(
-              context,
-              auth: _auth, // o tu AuthService actual
-              me: _me, // si ya tienes la ubicación
-              onSubmitted: () {
-                // opcional: si en el futuro las propuestas aprobadas
-                // pasan a la colección bathrooms, aquí refrescas.
-                // _loadBathrooms();
-              },
-            ),
+
+      // ——— BARRA INFERIOR ———
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+          child: Row(
+            children: [
+              // IZQUIERDA: Sugerir baño (pastel con texto)
+              Expanded(
+                child: _PillButton(
+                  icon: Icons.add_location_alt,
+                  label: 'Sugerir baño',
+                  onTap: () => openProposeBathroomSheet(
+                    context,
+                    auth: _auth,
+                    me: _me,
+                    onSubmitted: _loadBathrooms,
+                  ),
+                ),
+              ),
+
+              const SizedBox(width: 12),
+
+              // CENTRO: Mi ubicación (circular, sin texto)
+              _CircleAction(
+                icon: Icons.my_location,
+                onTap: () async {
+                  final ok = await ensureLocationPermissionSmart(
+                    context,
+                    interactive: true,
+                  );
+                  if (!ok) return;
+                  final pos = await Geolocator.getCurrentPosition(
+                    locationSettings: kLocSettings,
+                  );
+                  if (!mounted) return;
+                  setState(() => _me = LatLng(pos.latitude, pos.longitude));
+                  _map.move(_me!, kUserZoom);
+                },
+              ),
+
+              const SizedBox(width: 12),
+
+              // DERECHA: Filtros (pastel con texto)
+              Expanded(
+                child: _PillButton(
+                  icon: Icons.filter_list,
+                  label: 'Filtrar',
+                  onTap: () async {
+                    await openFilterSheet(
+                      context,
+                      initial: FilterOptions(
+                        free: _free,
+                        accessible: _accessible,
+                      ),
+                    ).then((opts) {
+                      if (opts == null) return;
+                      setState(() {
+                        _free = opts.free;
+                        _accessible = opts.accessible;
+                      });
+                      _applyFilters();
+                    });
+                  },
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 10),
-          // FAB: Mi ubicación (tu existente)
-          FloatingActionButton(
-            heroTag: 'fab-location',
-            tooltip: 'Mi ubicación',
-            onPressed: () async {
-              final ok = await ensureLocationPermissionSmart(
-                context,
-                interactive: true,
-              );
-              if (!ok) return;
-              final pos = await Geolocator.getCurrentPosition(
-                locationSettings: kLocSettings,
-              );
-              if (!mounted) return;
-              setState(() => _me = LatLng(pos.latitude, pos.longitude));
-              _map.move(_me!, kUserZoom);
-            },
-            child: const Icon(Icons.my_location),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -211,6 +247,7 @@ class _MapScreenState extends State<MapScreen> {
               icon: Icon(
                 Icons.wc,
                 size: 35,
+                // Colores temporales (hasta que integremos opening_hours)
                 color: b.isAccessible
                     ? (b.isFree ? Colors.green : Colors.blue)
                     : (b.isFree ? Colors.purple : Colors.red),
@@ -221,7 +258,7 @@ class _MapScreenState extends State<MapScreen> {
                 me: _me,
                 onReview: _openReviewSheet,
                 onReport: _handleReportTap,
-                onDetails: _openBathroomDetail, // <-- agrega esto
+                onDetails: _openBathroomDetail,
               ),
             ),
           ),
@@ -256,7 +293,7 @@ class _MapScreenState extends State<MapScreen> {
             TileLayer(
               urlTemplate:
                   'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
-              subdomains: ['a', 'b', 'c', 'd'],
+              subdomains: const ['a', 'b', 'c', 'd'],
               userAgentPackageName: 'cl.banoapp.ejemplo',
             ),
             RichAttributionWidget(
@@ -282,28 +319,12 @@ class _MapScreenState extends State<MapScreen> {
             MarkerLayer(markers: markers),
           ],
         ),
+        // Barra de búsqueda arriba
         Positioned(
           top: 10,
           left: 10,
           right: 10,
-          child: Column(
-            children: [
-              MapSearchBar(controller: _search),
-              const SizedBox(height: 8),
-              MapFilterChips(
-                free: _free,
-                onFree: (v) {
-                  setState(() => _free = v);
-                  _applyFilters();
-                },
-                accessible: _accessible,
-                onAccessible: (v) {
-                  setState(() => _accessible = v);
-                  _applyFilters();
-                },
-              ),
-            ],
-          ),
+          child: MapSearchBar(controller: _search),
         ),
       ],
     );
@@ -315,7 +336,7 @@ class _MapScreenState extends State<MapScreen> {
       auth: _auth,
       bathroomId: id,
       bathroomName: name,
-      onSaved: _loadBathrooms, // refresca lista tras publicar
+      onSaved: _loadBathrooms,
     );
   }
 
@@ -334,13 +355,105 @@ class _MapScreenState extends State<MapScreen> {
       await openAuthSheet(context, _auth);
       if (_auth.currentUser == null) return;
     }
-
     await openReportSheet(
       context,
-      auth: _auth, // tu AuthService
+      auth: _auth,
       target: ReportTarget.bathroom,
       bathroomId: id,
       title: 'Reportar: $name',
+    );
+  }
+}
+
+/// Botón “pastilla” (fondo pastel, con icono + texto)
+class _PillButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  const _PillButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: kPurpleSoft,
+      borderRadius: BorderRadius.circular(28),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(28),
+        onTap: onTap,
+        child: Container(
+          height: 56,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          alignment: Alignment.center,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, color: kPurpleText),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  label,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w600,
+                    color: kPurpleText,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Botón circular central (sin texto, icono centrado, morado)
+class _CircleAction extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+
+  const _CircleAction({required this.icon, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 88,
+      height: 56,
+      alignment: Alignment.center,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          // “silueta” pastel detrás
+          Positioned.fill(
+            child: Container(
+              decoration: BoxDecoration(
+                color: kPurpleSoft,
+                borderRadius: BorderRadius.circular(28),
+              ),
+            ),
+          ),
+          // botón circular
+          Material(
+            color: kPurple,
+            shape: const CircleBorder(),
+            elevation: 2,
+            child: InkWell(
+              customBorder: const CircleBorder(),
+              onTap: onTap,
+              child: SizedBox(
+                width: 64,
+                height: 64,
+                child: Center(child: Icon(icon, color: Colors.white, size: 28)),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
