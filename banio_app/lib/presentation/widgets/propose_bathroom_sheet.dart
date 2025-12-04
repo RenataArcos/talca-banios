@@ -314,7 +314,7 @@ class _ProposeBathroomFormState extends State<_ProposeBathroomForm> {
                           }
                         },
                   icon: const Icon(Icons.location_pin),
-                  label: const Text('Elegir en mapa'),
+                  label: const Text('Ubicar en mapa'),
                 ),
                 const SizedBox(width: 8),
               ],

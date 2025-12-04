@@ -155,7 +155,7 @@ class _MapScreenState extends State<MapScreen> {
               Expanded(
                 child: _PillButton(
                   icon: Icons.filter_list,
-                  label: 'Filtrar',
+                  label: 'Filtros',
                   onTap: () async {
                     await openFilterSheet(
                       context,
