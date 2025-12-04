@@ -189,14 +189,7 @@ class _MapScreenState extends State<MapScreen> {
             height: 40,
             point: LatLng(b.lat, b.lon),
             child: IconButton(
-              icon: Icon(
-                Icons.wc,
-                size: 35,
-
-                color: b.isAccessible
-                    ? (b.isFree ? Colors.green : Colors.blue)
-                    : (b.isFree ? Colors.purple : Colors.red),
-              ),
+              icon: Icon(Icons.wc, size: 35, color: Colors.deepPurple),
               onPressed: () => BathroomSheet.show(
                 context,
                 b,
