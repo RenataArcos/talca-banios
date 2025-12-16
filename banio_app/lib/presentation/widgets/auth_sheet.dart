@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../core/utils/auth_service.dart';
+import '../screens/my_reviews_screen.dart';
 
 Future<void> openAuthSheet(BuildContext context, AuthService auth) async {
   final user = auth.currentUser;
@@ -64,6 +65,19 @@ class _LoggedSheet extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 16),
+            OutlinedButton.icon(
+              onPressed: () {
+                Navigator.pop(context); // cierra la hoja
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => MyReviewsScreen(auth: auth),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.history),
+              label: const Text('Mi historial'),
+            ),
+            const SizedBox(height: 8),
             FilledButton.icon(
               onPressed: () async {
                 await auth.signOut();
