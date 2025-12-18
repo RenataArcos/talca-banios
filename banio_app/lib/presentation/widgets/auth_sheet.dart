@@ -1,3 +1,7 @@
+import 'package:banio_app/data/models/app_user_model.dart';
+import 'package:banio_app/data/repositories/user_repository_impl.dart';
+import 'package:banio_app/domain/entities/app_user.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../core/utils/auth_service.dart';
@@ -135,6 +139,8 @@ class _LoginRegisterSheetState extends State<_LoginRegisterSheet> {
         u = await widget.auth.signUpEmail(email, pass);
       }
       if (u != null && mounted) {
+        final repo = UserRepositoryImpl(FirebaseFirestore.instance);
+        await repo.ensureUserDoc(AppUserModel.fromFirebaseUser(u));
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -201,6 +207,12 @@ class _LoginRegisterSheetState extends State<_LoginRegisterSheet> {
                           try {
                             final u = await widget.auth.signInGoogle();
                             if (u != null && mounted) {
+                              final repo = UserRepositoryImpl(
+                                FirebaseFirestore.instance,
+                              );
+                              await repo.ensureUserDoc(
+                                AppUserModel.fromFirebaseUser(u),
+                              );
                               Navigator.pop(context);
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(

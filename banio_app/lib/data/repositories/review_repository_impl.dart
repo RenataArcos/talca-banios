@@ -1,6 +1,8 @@
+import 'package:banio_app/data/repositories/bathroom_repository_impl.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/user_review_item.dart';
 import '../models/review_model.dart';
+import 'package:collection/collection.dart';
 
 class ReviewRepositoryImpl {
   final _db = FirebaseFirestore.instance;
@@ -64,5 +66,26 @@ class ReviewRepositoryImpl {
       );
     }
     return out;
+  }
+
+  Future<void> deleteReview({
+    required String bathroomId,
+    required String reviewId,
+  }) async {
+    final ref = _db
+        .collection('bathrooms')
+        .doc(bathroomId)
+        .collection('reviews')
+        .doc(reviewId);
+
+    await ref.delete();
+
+    // Recalcula agregados y actualiza el baño
+    final (avg, count) = await recomputeAggregates(bathroomId);
+    await BathroomRepositoryImpl().updateAggregate(
+      bathroomId: bathroomId,
+      ratingAvg: double.parse(avg.toStringAsFixed(2)),
+      ratingCount: count,
+    );
   }
 }

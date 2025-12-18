@@ -1,5 +1,7 @@
 // lib/presentation/screens/map_screen.dart
 import 'dart:async';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
@@ -9,16 +11,17 @@ import '../../core/utils/auth_service.dart';
 import '../../core/utils/locations_utils.dart';
 import '../widgets/auth_sheet.dart';
 import '../widgets/report_sheet.dart';
-//import '../widgets/search_bar.dart';
 import '../widgets/bathroom_sheet.dart';
 import '../widgets/bathroom_detail_sheet.dart';
 import '../widgets/propose_bathroom_sheet.dart';
 import '../widgets/filter_sheet.dart';
 
-import '../../data/models/bathroom_model.dart';
 import '../../data/repositories/bathroom_repository_impl.dart';
 import '../../domain/entities/bathroom.dart';
 import '../widgets/review_sheet.dart';
+
+import '../../data/repositories/user_repository_impl.dart';
+import '../screens/moderation_screen.dart';
 
 const kPurple = Color(0xFF6F5DE7);
 const kPurpleSoft = Color(0xFFEDE7FF);
@@ -33,6 +36,11 @@ class MapScreen extends StatefulWidget {
 class _MapScreenState extends State<MapScreen> {
   final _auth = AuthService();
 
+  bool _isAdmin = false;
+  StreamSubscription<User?>? _authSub;
+  StreamSubscription<bool>? _adminSub;
+  StreamSubscription<List<Bathroom>>? _bathroomsSub;
+
   bool _isLoading = true;
   final TextEditingController _search = TextEditingController();
   bool _free = false, _accessible = false;
@@ -46,11 +54,35 @@ class _MapScreenState extends State<MapScreen> {
     super.initState();
     _search.addListener(_applyFilters);
     _centerOnStartup();
-    _loadBathrooms();
+
+    // 1) Suscripción en vivo a baños (refresca mapa al aprobar propuesta)
+    _bathroomsSub = BathroomRepositoryImpl().streamAllFromFirestore().listen((
+      list,
+    ) {
+      setState(() {
+        _all = list;
+        _applyFilters();
+        _isLoading = false;
+      });
+    });
+
+    // 2) Seguir sesión y rol admin en tiempo real
+    _authSub = FirebaseAuth.instance.authStateChanges().listen((u) {
+      _adminSub?.cancel();
+      setState(() => _isAdmin = false);
+      if (u != null) {
+        _adminSub = UserRepositoryImpl(
+          FirebaseFirestore.instance,
+        ).adminStream(u.uid).listen((v) => setState(() => _isAdmin = v));
+      }
+    });
   }
 
   @override
   void dispose() {
+    _bathroomsSub?.cancel();
+    _adminSub?.cancel();
+    _authSub?.cancel();
     _search.removeListener(_applyFilters);
     _search.dispose();
     super.dispose();
@@ -72,16 +104,6 @@ class _MapScreenState extends State<MapScreen> {
     } catch (_) {}
   }
 
-  Future<void> _loadBathrooms() async {
-    final repo = BathroomRepositoryImpl();
-    final fbBathrooms = await repo.getAllFromFirestore();
-    setState(() {
-      _all = fbBathrooms;
-      _filtered = fbBathrooms;
-      _isLoading = false;
-    });
-  }
-
   void _applyFilters() {
     var list = _all;
     final q = _search.text.toLowerCase();
@@ -90,7 +112,7 @@ class _MapScreenState extends State<MapScreen> {
     }
     if (_free) list = list.where((b) => b.isFree).toList();
     if (_accessible) list = list.where((b) => b.isAccessible).toList();
-    setState(() => _filtered = list);
+    _filtered = list;
   }
 
   @override
@@ -99,6 +121,22 @@ class _MapScreenState extends State<MapScreen> {
       appBar: AppBar(
         title: const Text('TalcaToilet! - Mapeo en Talca'),
         actions: [
+          if (_isAdmin)
+            IconButton(
+              tooltip: 'Moderación',
+              icon: const Icon(Icons.admin_panel_settings),
+              onPressed: () {
+                if (!_isAdmin) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Solo administradores')),
+                  );
+                  return;
+                }
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const ModerationScreen()),
+                );
+              },
+            ),
           IconButton(
             tooltip: (_auth.currentUser == null) ? 'Iniciar sesión' : 'Cuenta',
             icon: Icon(
@@ -126,13 +164,12 @@ class _MapScreenState extends State<MapScreen> {
                     context,
                     auth: _auth,
                     me: _me,
-                    onSubmitted: _loadBathrooms,
+                    // ya no necesitamos _loadBathrooms; el stream actualiza solo
+                    onSubmitted: () {},
                   ),
                 ),
               ),
-
               const SizedBox(width: 12),
-
               _CircleAction(
                 icon: Icons.my_location,
                 onTap: () async {
@@ -149,26 +186,23 @@ class _MapScreenState extends State<MapScreen> {
                   _map.move(_me!, kUserZoom);
                 },
               ),
-
               const SizedBox(width: 12),
-
               Expanded(
                 child: _PillButton(
                   icon: Icons.filter_list,
                   label: 'Filtros',
                   onTap: () async {
-                    await openFilterSheet(
+                    final opts = await openFilterSheet(
                       context,
                       initial: FilterOptions(
                         free: _free,
                         accessible: _accessible,
                       ),
-                    ).then((opts) {
-                      if (opts == null) return;
-                      setState(() {
-                        _free = opts.free;
-                        _accessible = opts.accessible;
-                      });
+                    );
+                    if (opts == null) return;
+                    setState(() {
+                      _free = opts.free;
+                      _accessible = opts.accessible;
                       _applyFilters();
                     });
                   },
@@ -189,7 +223,7 @@ class _MapScreenState extends State<MapScreen> {
             height: 40,
             point: LatLng(b.lat, b.lon),
             child: IconButton(
-              icon: Icon(Icons.wc, size: 35, color: Colors.deepPurple),
+              icon: const Icon(Icons.wc, size: 35, color: Colors.deepPurple),
               onPressed: () => BathroomSheet.show(
                 context,
                 b,
@@ -234,9 +268,9 @@ class _MapScreenState extends State<MapScreen> {
               subdomains: const ['a', 'b', 'c', 'd'],
               userAgentPackageName: 'cl.banoapp.ejemplo',
             ),
-            RichAttributionWidget(
+            const RichAttributionWidget(
               alignment: AttributionAlignment.bottomRight,
-              attributions: const [
+              attributions: [
                 TextSourceAttribution('© OpenStreetMap contributors'),
                 TextSourceAttribution('© CARTO'),
               ],
@@ -267,7 +301,7 @@ class _MapScreenState extends State<MapScreen> {
       auth: _auth,
       bathroomId: id,
       bathroomName: name,
-      onSaved: _loadBathrooms,
+      onSaved: () {}, // el stream ya refresca
     );
   }
 
@@ -277,7 +311,7 @@ class _MapScreenState extends State<MapScreen> {
       auth: _auth,
       bathroomId: id,
       bathroomName: name,
-      onReviewSaved: _loadBathrooms,
+      onReviewSaved: () {}, // el stream ya refresca
     );
   }
 
@@ -372,10 +406,12 @@ class _CircleAction extends StatelessWidget {
             child: InkWell(
               customBorder: const CircleBorder(),
               onTap: onTap,
-              child: SizedBox(
+              child: const SizedBox(
                 width: 64,
                 height: 64,
-                child: Center(child: Icon(icon, color: Colors.white, size: 28)),
+                child: Center(
+                  child: Icon(Icons.my_location, color: Colors.white, size: 28),
+                ),
               ),
             ),
           ),
