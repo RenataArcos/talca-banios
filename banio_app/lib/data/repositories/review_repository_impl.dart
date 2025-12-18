@@ -2,7 +2,6 @@ import 'package:banio_app/data/repositories/bathroom_repository_impl.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/user_review_item.dart';
 import '../models/review_model.dart';
-import 'package:collection/collection.dart';
 
 class ReviewRepositoryImpl {
   final _db = FirebaseFirestore.instance;

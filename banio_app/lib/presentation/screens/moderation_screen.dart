@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../data/repositories/proposal_repository_impl.dart';
 import '../../data/repositories/review_repository_impl.dart';
-import '../../data/repositories/bathroom_repository_impl.dart';
 
 class ModerationScreen extends StatelessWidget {
   const ModerationScreen({super.key});

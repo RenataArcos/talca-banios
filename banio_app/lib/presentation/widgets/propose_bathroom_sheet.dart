@@ -1,11 +1,8 @@
 // lib/presentation/widgets/propose_bathroom_sheet.dart
 import 'dart:async';
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../core/utils/auth_service.dart';
@@ -19,7 +16,7 @@ Future<void> openProposeBathroomSheet(
   LatLng? me,
   VoidCallback? onSubmitted,
 }) async {
-  // Gate de auth
+  // Gate de autenticación
   if (auth.currentUser == null) {
     await openAuthSheet(hostContext, auth);
     if (auth.currentUser == null) return;
@@ -60,15 +57,12 @@ class _ProposeBathroomFormState extends State<_ProposeBathroomForm> {
   final _name = TextEditingController();
   final _desc = TextEditingController();
 
-  String _fee = 'unknown';
-  String _wheelchair = 'unknown';
+  // Dropdowns (se derivan a booleans al enviar)
+  String _fee = 'unknown'; // 'unknown' | 'no' | 'yes'  (UI: 'yes' = gratis)
+  String _wheelchair = 'unknown'; // 'unknown' | 'no' | 'limited' | 'yes'
 
   double? _lat, _lon;
   bool _saving = false;
-
-  final List<XFile> _images = [];
-  final _picker = ImagePicker();
-
   String? _err;
 
   @override
@@ -102,21 +96,6 @@ class _ProposeBathroomFormState extends State<_ProposeBathroomForm> {
     });
   }
 
-  Future<void> _pickImages() async {
-    try {
-      final files = await _picker.pickMultiImage(
-        imageQuality: 75, // comprime un poco
-        maxWidth: 1600,
-        maxHeight: 1600,
-      );
-      if (files != null && files.isNotEmpty) {
-        setState(() => _images.addAll(files));
-      }
-    } catch (_) {
-      // silencio
-    }
-  }
-
   Future<void> _submit() async {
     if (_saving) return;
 
@@ -135,72 +114,49 @@ class _ProposeBathroomFormState extends State<_ProposeBathroomForm> {
       _err = null;
     });
 
-    // Cierra ya el sheet (UI optimista) y muestra progreso
-    if (Navigator.of(context).canPop()) {
-      Navigator.of(context).pop();
-    }
+    // UI optimista
+    if (Navigator.of(context).canPop()) Navigator.of(context).pop();
     if (widget.hostContext.mounted) {
       ScaffoldMessenger.of(
         widget.hostContext,
       ).showSnackBar(const SnackBar(content: Text('Enviando propuesta…')));
     }
 
-    // Trabajo en background
-    Future.microtask(() async {
-      try {
-        final uid = widget.auth.currentUser!.uid;
-        final col = FirebaseFirestore.instance.collection('bathroom_proposals');
+    // Derivar booleans desde dropdowns:
+    final bool isFree = (_fee == 'yes'); // 'yes' en UI = gratis
+    final bool wheelchairAccessible =
+        (_wheelchair == 'yes' || _wheelchair == 'limited');
 
-        // 1) Crea doc sin fotos
-        final doc = await col.add({
-          'name': name,
-          'lat': _lat,
-          'lon': _lon,
-          'fee': _fee, // yes/no/unknown
-          'wheelchair': _wheelchair, // yes/no/limited/unknown
-          'description': _desc.text.trim(),
-          'createdAt': FieldValue.serverTimestamp(),
-          'createdBy': uid,
-          'status': 'pending',
-          'photos': <String>[],
-        });
+    try {
+      final uid = widget.auth.currentUser!.uid;
+      await FirebaseFirestore.instance.collection('bathroom_proposals').add({
+        'name': name,
+        'lat': _lat,
+        'lon': _lon,
+        // SOLO booleans en la propuesta:
+        'isFree': isFree,
+        'wheelchairAccessible': wheelchairAccessible,
+        'description': _desc.text.trim(),
+        'createdAt': FieldValue.serverTimestamp(),
+        'createdBy': uid,
+        'status': 'pending',
+      });
 
-        // 2) Sube fotos (si hay) a: user_uploads/{uid}/proposals/{docId}/...
-        if (_images.isNotEmpty) {
-          final storage = FirebaseStorage.instance;
-          final urls = <String>[];
-          for (int i = 0; i < _images.length; i++) {
-            final f = _images[i];
-            final bytes = await f.readAsBytes();
-            final ref = storage.ref().child(
-              'user_uploads/$uid/proposals/${doc.id}/${DateTime.now().millisecondsSinceEpoch}_$i.jpg',
-            );
-            await ref.putData(
-              bytes,
-              SettableMetadata(contentType: 'image/jpeg'),
-            );
-            final url = await ref.getDownloadURL();
-            urls.add(url);
-          }
-          await doc.update({'photos': urls});
-        }
-
-        if (widget.hostContext.mounted) {
-          ScaffoldMessenger.of(widget.hostContext).showSnackBar(
-            const SnackBar(content: Text('¡Propuesta enviada para revisión!')),
-          );
-        }
-        widget.onSubmitted?.call();
-      } catch (e) {
-        if (widget.hostContext.mounted) {
-          ScaffoldMessenger.of(widget.hostContext).showSnackBar(
-            SnackBar(content: Text('No se pudo enviar la propuesta: $e')),
-          );
-        }
-      } finally {
-        if (mounted) setState(() => _saving = false);
+      if (widget.hostContext.mounted) {
+        ScaffoldMessenger.of(widget.hostContext).showSnackBar(
+          const SnackBar(content: Text('¡Propuesta enviada para revisión!')),
+        );
       }
-    });
+      widget.onSubmitted?.call();
+    } catch (e) {
+      if (widget.hostContext.mounted) {
+        ScaffoldMessenger.of(widget.hostContext).showSnackBar(
+          SnackBar(content: Text('No se pudo enviar la propuesta: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
   @override
@@ -295,62 +251,57 @@ class _ProposeBathroomFormState extends State<_ProposeBathroomForm> {
 
             Row(
               children: [
-                OutlinedButton.icon(
-                  onPressed: _saving
-                      ? null
-                      : () async {
-                          final picked = await openLocationPicker(
-                            widget.hostContext,
-                            init: (_lat != null && _lon != null)
-                                ? LatLng(_lat!, _lon!)
-                                : (widget.me ?? kTalcaCenter),
-                            myPos: widget.me,
-                          );
-                          if (picked != null && mounted) {
-                            setState(() {
-                              _lat = picked.latitude;
-                              _lon = picked.longitude;
-                            });
-                          }
-                        },
-                  icon: const Icon(Icons.location_pin),
-                  label: const Text('Ubicar en mapa'),
-                ),
-                const SizedBox(width: 8),
-              ],
-            ),
-
-            const SizedBox(height: 10),
-
-            // Fotos
-            Row(
-              children: [
-                Expanded(child: Text('Fotos: ${_images.length} seleccionadas')),
-                OutlinedButton.icon(
-                  onPressed: _saving ? null : _pickImages,
-                  icon: const Icon(Icons.photo_library),
-                  label: const Text('Añadir fotos'),
-                ),
-              ],
-            ),
-            if (_images.isNotEmpty) ...[
-              const SizedBox(height: 6),
-              SizedBox(
-                height: 70,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: _images.length,
-                  separatorBuilder: (_, __) => const SizedBox(width: 8),
-                  itemBuilder: (_, i) => ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: Image.file(
-                      File(_images[i].path),
-                      fit: BoxFit.cover,
-                      width: 70,
-                      height: 70,
+                Expanded(
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size(0, 48),
+                    ),
+                    onPressed: _saving
+                        ? null
+                        : () async {
+                            final picked = await openLocationPicker(
+                              widget.hostContext,
+                              init: (_lat != null && _lon != null)
+                                  ? LatLng(_lat!, _lon!)
+                                  : (widget.me ?? kTalcaCenter),
+                              myPos: widget.me,
+                            );
+                            if (picked != null && mounted) {
+                              setState(() {
+                                _lat = picked.latitude;
+                                _lon = picked.longitude;
+                              });
+                            }
+                          },
+                    icon: const Icon(Icons.location_pin),
+                    label: const Text(
+                      'Ubicar en mapa',
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                 ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size(0, 48),
+                    ),
+                    onPressed: _saving ? null : _useMyLocation,
+                    icon: const Icon(Icons.my_location),
+                    label: const Text(
+                      'Usar mi ubicación',
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+
+            if (_lat != null && _lon != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Ubicación: ${_lat!.toStringAsFixed(6)}, ${_lon!.toStringAsFixed(6)}',
+                style: Theme.of(context).textTheme.bodySmall,
               ),
             ],
 

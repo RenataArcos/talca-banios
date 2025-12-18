@@ -1,6 +1,5 @@
 import 'package:banio_app/data/models/app_user_model.dart';
 import 'package:banio_app/data/repositories/user_repository_impl.dart';
-import 'package:banio_app/domain/entities/app_user.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
