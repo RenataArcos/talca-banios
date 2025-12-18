@@ -7,10 +7,17 @@ class BathroomRepositoryImpl {
 
   Future<List<Bathroom>> getAllFromFirestore() async {
     final qs = await _col.get();
+    return _mapQuery(qs);
+  }
+
+  Stream<List<Bathroom>> streamAllFromFirestore() {
+    return _col.snapshots().map(_mapQuery);
+  }
+
+  List<Bathroom> _mapQuery(QuerySnapshot<Map<String, dynamic>> qs) {
     return qs.docs.map((d) {
       final m = d.data();
 
-      // Parte clave: construir tags base e INYECTAR agregados si existen
       final tags = Map<String, dynamic>.from(m['tags'] ?? {})
         ..addAll({
           'name': m['name'] ?? '',
@@ -18,7 +25,6 @@ class BathroomRepositoryImpl {
           'toilets:wheelchair': m['wheelchair'] ?? '',
         });
 
-      // <- Agregados para que el UI los lea desde tags
       if (m['ratingAvg'] != null) {
         final ra = m['ratingAvg'];
         tags['ratingAvg'] = (ra is num)
@@ -60,5 +66,10 @@ class BathroomRepositoryImpl {
       'ratingCount': ratingCount,
       'updatedAt': DateTime.now(),
     }, SetOptions(merge: true));
+  }
+
+  Future<void> createBathroom(BathroomModel b) async {
+    final id = b.id.toString();
+    await _col.doc(id).set(b.toMap(), SetOptions(merge: true));
   }
 }

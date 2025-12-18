@@ -1,4 +1,5 @@
 import '../../domain/entities/app_user.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class AppUserModel extends AppUser {
   const AppUserModel({
@@ -6,6 +7,7 @@ class AppUserModel extends AppUser {
     required super.email,
     required super.displayName,
     required super.photoUrl,
+    required super.role,
     required super.createdAt,
   });
 
@@ -13,6 +15,7 @@ class AppUserModel extends AppUser {
     'email': email,
     'displayName': displayName,
     'photoUrl': photoUrl,
+    if (role != null) 'role': role,
     'createdAt': createdAt.toIso8601String(),
   };
 
@@ -22,6 +25,7 @@ class AppUserModel extends AppUser {
       email: fu.email as String?,
       displayName: fu.displayName as String?,
       photoUrl: fu.photoURL as String?,
+      role: null,
       createdAt: DateTime.now(),
     );
   }
@@ -32,6 +36,7 @@ class AppUserModel extends AppUser {
       email: m['email'] as String?,
       displayName: m['displayName'] as String?,
       photoUrl: m['photoUrl'] as String?,
+      role: m['role'] as String?,
       createdAt: DateTime.tryParse(m['createdAt'] ?? '') ?? DateTime.now(),
     );
   }
