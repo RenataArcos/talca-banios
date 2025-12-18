@@ -141,4 +141,8 @@ class BathroomRepositoryImpl {
       if (wheel.isNotEmpty) 'wheelchair': wheel, // 'yes'|'no'|'limited'
     }, SetOptions(merge: true));
   }
+
+  Future<void> deleteBathroom(String bathroomId) async {
+    await _col.doc(bathroomId).delete();
+  }
 }

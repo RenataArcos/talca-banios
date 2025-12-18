@@ -9,13 +9,23 @@ class ReviewRepositoryImpl {
   CollectionReference<Map<String, dynamic>> _col(String bathroomId) =>
       _db.collection('bathrooms').doc(bathroomId).collection('reviews');
 
+  // Crear reseña
   Future<void> addReview({
     required String bathroomId,
     required ReviewModel review,
   }) async {
     await _col(bathroomId).add(review.toMap());
+
+    // Recalcula agregados tras crear
+    final (avg, count) = await recomputeAggregates(bathroomId);
+    await BathroomRepositoryImpl().updateAggregate(
+      bathroomId: bathroomId,
+      ratingAvg: double.parse(avg.toStringAsFixed(2)),
+      ratingCount: count,
+    );
   }
 
+  // Listar reseñas de un baño
   Future<List<ReviewModel>> getReviews(String bathroomId) async {
     final snap = await _col(
       bathroomId,
@@ -23,6 +33,7 @@ class ReviewRepositoryImpl {
     return snap.docs.map((d) => ReviewModel.fromMap(d.id, d.data())).toList();
   }
 
+  // Promedio y conteo
   Future<(double, int)> recomputeAggregates(String bathroomId) async {
     final reviews = await getReviews(bathroomId);
     if (reviews.isEmpty) return (0.0, 0);
@@ -39,20 +50,22 @@ class ReviewRepositoryImpl {
         .orderBy('createdAt', descending: true)
         .get();
 
-    // Cache local de nombres de baño para evitar lecturas repetidas.
     final Map<String, String> nameCache = {};
 
     Future<String> _bathroomName(String id) async {
       if (nameCache.containsKey(id)) return nameCache[id]!;
       final d = await fs.collection('bathrooms').doc(id).get();
-      final nm = (d.data()?['name'] as String?) ?? '';
+      final nm =
+          (d.data()?['name'] as String?) ??
+          (d.data()?['tags']?['name'] as String?) ??
+          '';
       nameCache[id] = nm;
       return nm;
     }
 
     final List<UserReviewItem> out = [];
     for (final doc in qs.docs) {
-      final parent = doc.reference.parent.parent; // bathrooms/{id}
+      final parent = doc.reference.parent.parent;
       if (parent == null) continue;
       final bathroomId = parent.id;
       final name = await _bathroomName(bathroomId);
@@ -67,19 +80,37 @@ class ReviewRepositoryImpl {
     return out;
   }
 
+  // EDITAR reseña
+  Future<void> updateReview({
+    required String bathroomId,
+    required String reviewId,
+    required int rating,
+    required String comment,
+  }) async {
+    await _col(bathroomId).doc(reviewId).update({
+      'rating': rating,
+      'comment': comment,
+      'editedAt': FieldValue.serverTimestamp(),
+    });
+
+    // Recalcula agregados tras editar
+    final (avg, count) = await recomputeAggregates(bathroomId);
+    await BathroomRepositoryImpl().updateAggregate(
+      bathroomId: bathroomId,
+      ratingAvg: double.parse(avg.toStringAsFixed(2)),
+      ratingCount: count,
+    );
+  }
+
+  // BORRAR reseña
   Future<void> deleteReview({
     required String bathroomId,
     required String reviewId,
   }) async {
-    final ref = _db
-        .collection('bathrooms')
-        .doc(bathroomId)
-        .collection('reviews')
-        .doc(reviewId);
-
+    final ref = _col(bathroomId).doc(reviewId);
     await ref.delete();
 
-    // Recalcula agregados y actualiza el baño
+    // Recalcula agregados tras borrar
     final (avg, count) = await recomputeAggregates(bathroomId);
     await BathroomRepositoryImpl().updateAggregate(
       bathroomId: bathroomId,

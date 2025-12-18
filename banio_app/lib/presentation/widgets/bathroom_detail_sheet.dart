@@ -5,7 +5,7 @@ import '../../core/utils/auth_service.dart';
 import '../../data/models/review_model.dart';
 import '../../data/repositories/review_repository_impl.dart';
 import 'review_sheet.dart';
-import 'report_sheet.dart';
+import 'report_sheet.dart'; // <-- para reportar
 
 Future<void> openBathroomDetailSheet(
   BuildContext hostContext, {
@@ -61,9 +61,7 @@ class _BathroomDetailContentState extends State<_BathroomDetailContent> {
   }
 
   Future<void> _refresh() async {
-    setState(() {
-      _future = _repo.getReviews(widget.bathroomId);
-    });
+    setState(() => _future = _repo.getReviews(widget.bathroomId));
     await _future;
   }
 
@@ -119,6 +117,7 @@ class _BathroomDetailContentState extends State<_BathroomDetailContent> {
                   ),
                   const SizedBox(height: 12),
 
+                  // Escribir nueva reseña
                   SizedBox(
                     width: double.infinity,
                     child: OutlinedButton.icon(
@@ -128,7 +127,6 @@ class _BathroomDetailContentState extends State<_BathroomDetailContent> {
                         if (Navigator.of(context).canPop()) {
                           Navigator.of(context).pop();
                         }
-
                         scheduleMicrotask(() {
                           openReviewSheet(
                             widget.hostContext,
@@ -153,13 +151,81 @@ class _BathroomDetailContentState extends State<_BathroomDetailContent> {
                   else
                     ...List.generate(reviews.length, (i) {
                       final r = reviews[i];
+                      final isOwner = widget.auth.currentUser?.uid == r.userId;
+
                       return Column(
                         children: [
                           _ReviewTile(
                             model: r,
-                            hostContext: widget.hostContext,
-                            auth: widget.auth,
-                            bathroomId: widget.bathroomId,
+                            trailing: Wrap(
+                              spacing: 0,
+                              children: [
+                                // Reportar (cualquiera con sesión)
+                                IconButton(
+                                  tooltip: 'Reportar',
+                                  icon: const Icon(
+                                    Icons.report_outlined,
+                                    size: 20,
+                                  ),
+                                  onPressed: () async {
+                                    await openReportSheet(
+                                      context,
+                                      auth: widget.auth,
+                                      target: ReportTarget.review,
+                                      bathroomId: widget.bathroomId,
+                                      reviewId: r.id,
+                                      title: 'Reportar reseña',
+                                    );
+                                  },
+                                ),
+                                // Editar y borrar: solo dueño
+                                if (isOwner)
+                                  IconButton(
+                                    tooltip: 'Editar',
+                                    icon: const Icon(Icons.edit, size: 20),
+                                    onPressed: () async {
+                                      await openReviewSheet(
+                                        context,
+                                        auth: widget.auth,
+                                        bathroomId: widget.bathroomId,
+                                        bathroomName: widget.bathroomName,
+                                        reviewId: r.id, // <-- EDIT
+                                        initialRating: r.rating,
+                                        initialComment: r.comment,
+                                        onSaved: () async {
+                                          await _refresh();
+                                          widget.onReviewSaved?.call();
+                                        },
+                                      );
+                                    },
+                                  ),
+                                if (isOwner)
+                                  IconButton(
+                                    tooltip: 'Eliminar',
+                                    icon: const Icon(
+                                      Icons.delete_outline,
+                                      size: 20,
+                                    ),
+                                    onPressed: () async {
+                                      await ReviewRepositoryImpl().deleteReview(
+                                        bathroomId: widget.bathroomId,
+                                        reviewId: r.id,
+                                      );
+                                      if (context.mounted) {
+                                        ScaffoldMessenger.of(
+                                          context,
+                                        ).showSnackBar(
+                                          const SnackBar(
+                                            content: Text('Reseña eliminada'),
+                                          ),
+                                        );
+                                      }
+                                      await _refresh();
+                                      widget.onReviewSaved?.call();
+                                    },
+                                  ),
+                              ],
+                            ),
                           ),
                           if (i != reviews.length - 1)
                             const Divider(height: 12),
@@ -197,16 +263,8 @@ class _Stars extends StatelessWidget {
 
 class _ReviewTile extends StatelessWidget {
   final ReviewModel model;
-  final BuildContext hostContext;
-  final AuthService auth;
-  final String bathroomId;
-
-  const _ReviewTile({
-    required this.model,
-    required this.hostContext,
-    required this.auth,
-    required this.bathroomId,
-  });
+  final Widget? trailing;
+  const _ReviewTile({required this.model, this.trailing});
 
   @override
   Widget build(BuildContext context) {
@@ -239,28 +297,7 @@ class _ReviewTile extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             Text(dateTxt, style: Theme.of(context).textTheme.bodySmall),
-
-            IconButton(
-              tooltip: 'Reportar reseña',
-              icon: const Icon(Icons.flag, size: 18),
-              onPressed: () {
-                if (Navigator.of(context).canPop()) {
-                  Navigator.of(context).pop();
-                }
-                scheduleMicrotask(() {
-                  openReportSheet(
-                    hostContext,
-                    auth: auth,
-                    target: ReportTarget.review,
-                    bathroomId: bathroomId,
-                    reviewId: model.id,
-                    title:
-                        'Reportar reseña de '
-                        '${(model.userName.isEmpty) ? "Usuario" : model.userName}',
-                  );
-                });
-              },
-            ),
+            if (trailing != null) ...[const SizedBox(width: 4), trailing!],
           ],
         ),
         if (model.comment.isNotEmpty) ...[
